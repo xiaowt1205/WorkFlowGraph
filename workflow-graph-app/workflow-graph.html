@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkFlowGraph — 節點式工作流編輯器</title>
+<style>
+:root{
+  --bg:#0e1320; --panel:#151b2c; --panel2:#1a2136; --line:#28324d;
+  --text:#dce4f5; --dim:#8b96b5; --faint:#5a6584;
+  --accent:#5b8cff; --green:#3ecf8e; --red:#ff6b6b; --amber:#ffb02e;
+  --node-bg:#1b2338; --node-head:#222c47;
+  --c-input:#3ecf8e; --c-template:#b78bff; --c-llm:#5b8cff; --c-code:#ffb02e;
+  --c-http:#4dd0e1; --c-condition:#ff8a5c; --c-merge:#9aa7c7; --c-output:#ff6b9d; --c-note:#6b7694;
+  --radius:10px;
+  font-size:14px;
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%; overflow:hidden}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:"Segoe UI","Noto Sans TC","PingFang TC",system-ui,sans-serif;
+  display:flex; flex-direction:column;
+}
+button{
+  background:var(--panel2); color:var(--text); border:1px solid var(--line);
+  border-radius:6px; padding:5px 10px; cursor:pointer; font:inherit; font-size:13px;
+  display:inline-flex; align-items:center; gap:5px; white-space:nowrap;
+}
+button:hover{border-color:var(--accent); color:#fff}
+button.primary{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600}
+button.primary:hover{filter:brightness(1.12)}
+button:disabled{opacity:.45; cursor:not-allowed}
+input,select,textarea{
+  background:#101627; color:var(--text); border:1px solid var(--line);
+  border-radius:6px; padding:6px 8px; font:inherit; font-size:13px; width:100%;
+}
+textarea{resize:vertical; min-height:64px; font-family:ui-monospace,Consolas,monospace; line-height:1.45}
+input:focus,select:focus,textarea:focus{outline:none; border-color:var(--accent)}
+label{display:block; font-size:12px; color:var(--dim); margin:10px 0 4px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#2a3450; border-radius:5px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- Topbar ---------- */
+#topbar{
+  display:flex; align-items:center; gap:8px; padding:8px 12px;
+  background:var(--panel); border-bottom:1px solid var(--line); z-index:30; flex-wrap:wrap;
+}
+#topbar .brand{font-weight:700; font-size:15px; margin-right:6px; letter-spacing:.3px}
+#topbar .brand b{color:var(--accent)}
+#topbar .sep{width:1px; height:20px; background:var(--line); margin:0 4px}
+#topbar .spacer{flex:1}
+.toggle{display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--dim);
+  border:1px solid var(--line); border-radius:6px; padding:4px 10px; cursor:pointer; user-select:none}
+.toggle input{width:auto}
+.toggle.on{color:var(--green); border-color:var(--green)}
+
+/* ---------- Main layout ---------- */
+#main{flex:1; display:flex; min-height:0; position:relative}
+
+/* palette */
+#palette{
+  width:172px; background:var(--panel); border-right:1px solid var(--line);
+  padding:10px; overflow-y:auto; flex-shrink:0;
+}
+#palette h3{font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:1px; margin:6px 0 8px}
+.pal-item{
+  display:flex; align-items:center; gap:8px; padding:8px 9px; margin-bottom:6px;
+  background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+  cursor:grab; font-size:13px; user-select:none;
+}
+.pal-item:hover{border-color:var(--accent); transform:translateX(2px)}
+.pal-item .swatch{width:10px; height:10px; border-radius:3px; flex-shrink:0}
+.pal-hint{font-size:11px; color:var(--faint); line-height:1.5; margin-top:10px}
+
+/* canvas */
+#canvas-wrap{flex:1; position:relative; overflow:hidden; background:
+  radial-gradient(circle, #232c47 1px, transparent 1px) 0 0/26px 26px, var(--bg);
+  cursor:default}
+#viewport{position:absolute; top:0; left:0; transform-origin:0 0}
+#edgesvg{position:absolute; top:0; left:0; width:10px; height:10px; overflow:visible; pointer-events:none}
+#edgesvg path.edge{fill:none; stroke:#4a5878; stroke-width:2.2; pointer-events:stroke; cursor:pointer}
+#edgesvg path.edge:hover{stroke:var(--accent)}
+#edgesvg path.edge.selected{stroke:var(--accent); stroke-width:3}
+#edgesvg path.edge.flow{stroke:var(--green); stroke-dasharray:6 5; animation:flowdash .5s linear infinite}
+#edgesvg path.edge.deadflow{stroke:#39415c; stroke-dasharray:3 5}
+#edgesvg path.temp{fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:5 4}
+@keyframes flowdash{to{stroke-dashoffset:-11}}
+#hud{position:absolute; right:12px; bottom:10px; font-size:11px; color:var(--faint);
+  background:rgba(14,19,32,.75); padding:4px 9px; border-radius:6px; pointer-events:none}
+#emptyhint{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  color:var(--faint); font-size:14px; pointer-events:none; text-align:center; line-height:2}
+
+/* ---------- Node ---------- */
+.node{
+  position:absolute; width:210px; background:var(--node-bg);
+  border:1.5px solid var(--line); border-radius:var(--radius);
+  box-shadow:0 4px 16px rgba(0,0,0,.35); user-select:none;
+}
+.node.selected{border-color:var(--accent); box-shadow:0 0 0 3px rgba(91,140,255,.22), 0 4px 16px rgba(0,0,0,.4)}
+.node.running{border-color:var(--accent); animation:pulse 1s ease-in-out infinite}
+.node.success{border-color:var(--green)}
+.node.error{border-color:var(--red)}
+.node.skipped{opacity:.45; border-style:dashed}
+@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(91,140,255,.15)}}
+.node-head{
+  display:flex; align-items:center; gap:7px; padding:8px 10px;
+  background:var(--node-head); border-radius:9px 9px 0 0; cursor:grab;
+  font-weight:600; font-size:13px; border-bottom:1px solid var(--line);
+}
+.node-head .dot{width:9px; height:9px; border-radius:3px; flex-shrink:0}
+.node-head .st{margin-left:auto; font-size:11px; font-weight:400; color:var(--dim)}
+.node.running .st{color:var(--accent)} .node.success .st{color:var(--green)}
+.node.error .st{color:var(--red)}
+.node-body{padding:7px 10px; font-size:11.5px; color:var(--dim); line-height:1.5;
+  max-height:72px; overflow:hidden; text-overflow:ellipsis; white-space:pre-wrap; word-break:break-all}
+.node-ports{padding:2px 0 8px}
+.port-row{position:relative; height:22px; display:flex; align-items:center; font-size:11px; color:var(--dim)}
+.port-row.in{padding-left:16px} .port-row.out{justify-content:flex-end; padding-right:16px}
+.port{
+  position:absolute; width:12px; height:12px; border-radius:50%;
+  background:#0e1320; border:2px solid #63719a; cursor:crosshair; z-index:2;
+}
+.port:hover{border-color:#fff; transform:scale(1.25)}
+.port.in{left:-7px} .port.out{right:-7px}
+.port.connected{background:#63719a}
+.node-result{
+  margin:0 8px 8px; padding:6px 8px; background:#101627; border:1px solid var(--line);
+  border-radius:6px; font-size:11px; font-family:ui-monospace,Consolas,monospace;
+  color:var(--green); max-height:80px; overflow:auto; white-space:pre-wrap; word-break:break-all; display:none;
+}
+.node-result.show{display:block}
+.node-result.err{color:var(--red)}
+.node.type-note{width:190px; background:#1c2130; border-style:dashed}
+.node.type-note .node-body{color:#a7b1cc; max-height:200px}
+
+/* ---------- Inspector ---------- */
+#inspector{
+  width:295px; background:var(--panel); border-left:1px solid var(--line);
+  overflow-y:auto; flex-shrink:0; padding:14px;
+}
+#inspector h3{font-size:13px; margin-bottom:2px; display:flex; align-items:center; gap:8px}
+#inspector .type-tag{font-size:11px; color:var(--dim)}
+#inspector .empty{color:var(--faint); font-size:13px; margin-top:16px; line-height:1.7}
+#inspector .btnrow{display:flex; gap:6px; margin-top:14px}
+#insp-result{margin-top:14px}
+#insp-result pre{background:#101627; border:1px solid var(--line); border-radius:6px;
+  padding:8px; font-size:12px; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-all}
+
+/* ---------- Log panel ---------- */
+#logpanel{
+  height:148px; background:var(--panel); border-top:1px solid var(--line);
+  display:flex; flex-direction:column; flex-shrink:0;
+}
+#logpanel.collapsed{height:30px}
+#loghead{display:flex; align-items:center; padding:4px 12px; font-size:12px; color:var(--dim);
+  cursor:pointer; user-select:none; gap:8px; flex-shrink:0}
+#logbody{flex:1; overflow-y:auto; padding:2px 12px 8px; font-family:ui-monospace,Consolas,monospace; font-size:12px; line-height:1.6}
+#logbody .t{color:var(--faint); margin-right:8px}
+#logbody .ok{color:var(--green)} #logbody .er{color:var(--red)}
+#logbody .nm{color:var(--accent)} #logbody .wr{color:var(--amber)}
+
+/* ---------- Modal ---------- */
+.modal-mask{position:fixed; inset:0; background:rgba(5,8,15,.6); display:none;
+  align-items:center; justify-content:center; z-index:100}
+.modal-mask.show{display:flex}
+.modal{background:var(--panel); border:1px solid var(--line); border-radius:12px;
+  width:430px; max-width:92vw; padding:20px; box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.modal h2{font-size:15px; margin-bottom:4px}
+.modal .sub{font-size:12px; color:var(--dim); line-height:1.6}
+.modal .btnrow{display:flex; justify-content:flex-end; gap:8px; margin-top:18px}
+
+/* menu dropdown */
+.menu{position:absolute; background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+  padding:5px; z-index:90; box-shadow:0 10px 30px rgba(0,0,0,.5); display:none; min-width:210px}
+.menu.show{display:block}
+.menu button{display:flex; width:100%; border:none; background:none; text-align:left; padding:7px 10px; border-radius:6px}
+.menu button:hover{background:var(--panel)}
+kbd{background:#0d1220;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px;font-family:inherit}
+</style>
+</head>
+<body>
+
+<header id="topbar">
+  <span class="brand">WorkFlow<b>Graph</b></span>
+  <span class="sep"></span>
+  <button id="btn-examples">📂 範例 ▾</button>
+  <button id="btn-layout">🧭 自動排版</button>
+  <span class="sep"></span>
+  <button id="btn-undo" title="Ctrl+Z">↺</button>
+  <button id="btn-redo" title="Ctrl+Y">↻</button>
+  <button id="btn-clear">🗑 清空</button>
+  <span class="spacer"></span>
+  <span class="toggle on" id="tg-sim" title="模擬模式：LLM / HTTP 節點回傳假資料，不需 API 金鑰">
+    <input type="checkbox" id="cb-sim" checked>模擬模式
+  </span>
+  <button id="btn-settings">⚙ API 設定</button>
+  <span class="sep"></span>
+  <button id="btn-export">⤓ 匯出</button>
+  <button id="btn-import">⤒ 匯入</button>
+  <input type="file" id="file-import" accept=".json" style="display:none">
+  <span class="sep"></span>
+  <button class="primary" id="btn-run">▶ 執行</button>
+</header>
+
+<div id="main">
+  <aside id="palette">
+    <h3>節點庫（拖入畫布）</h3>
+    <div id="pal-list"></div>
+    <div class="pal-hint">
+      拖曳節點加入畫布<br>
+      從輸出埠 ● 拉線到輸入埠<br>
+      <kbd>Del</kbd> 刪除選取<br>
+      <kbd>Ctrl+D</kbd> 複製節點<br>
+      滾輪縮放、拖曳空白平移
+    </div>
+  </aside>
+
+  <div id="canvas-wrap">
+    <div id="viewport">
+      <svg id="edgesvg"></svg>
+      <div id="nodelayer"></div>
+    </div>
+    <div id="emptyhint">從左側拖入節點，或點「範例」載入現成工作流<br>建好後按 ▶ 執行</div>
+    <div id="hud">100%</div>
+  </div>
+
+  <aside id="inspector">
+    <div class="empty" id="insp-empty">點選節點以編輯參數。<br><br>這是一個 <b>Graph Engineering</b> 原型：節點＝運算單元，連線＝資料流。執行時依拓撲順序求值，條件節點會讓未選中的分支自動跳過。</div>
+    <div id="insp-form" style="display:none"></div>
+  </aside>
+</div>
+
+<div id="logpanel" class="collapsed">
+  <div id="loghead">▸ <b>執行日誌</b> <span id="logcount"></span></div>
+  <div id="logbody"></div>
+</div>
+
+<div class="modal-mask" id="settings-mask">
+  <div class="modal">
+    <h2>API 設定</h2>
+    <p class="sub">關閉模擬模式後，LLM 節點會呼叫 OpenAI 相容端點（OpenAI、Ollama、vLLM、LM Studio…）。設定僅存於本機瀏覽器。</p>
+    <label>API 端點 (Base URL)</label>
+    <input id="set-endpoint" placeholder="https://api.openai.com/v1 或 http://localhost:11434/v1">
+    <label>API 金鑰</label>
+    <input id="set-apikey" type="password" placeholder="sk-...（Ollama 可留空）">
+    <label>預設模型</label>
+    <input id="set-model" placeholder="gpt-4o-mini / llama3.1 ...">
+    <div class="btnrow">
+      <button id="set-cancel">取消</button>
+      <button class="primary" id="set-save">儲存</button>
+    </div>
+  </div>
+</div>
+
+<div class="menu" id="examples-menu"></div>
+
+<script>
+'use strict';
+/* =====================================================
+   WorkFlowGraph — 節點式工作流編輯器 / 執行引擎（單檔原型）
+   架構：NodeTypes 註冊表 → graph 狀態 → 畫布渲染 → 執行引擎
+   ===================================================== */
+
+const $ = s => document.querySelector(s);
+const uid = () => 'n' + Math.random().toString(36).slice(2, 9);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const clip = (s, n=120) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n) + '…' : s; };
+
+/* ---------- 節點型別註冊表 ---------- */
+const NodeTypes = {
+  input: {
+    title: '輸入', color: 'var(--c-input)', icon: '⌨',
+    inputs: [], outputs: [{ name: 'out', label: '文字' }],
+    params: [{ key: 'value', label: '輸入內容', kind: 'textarea', def: '' }],
+    summary: n => clip(n.params.value || '（空白）', 60),
+    async run(ctx) { return { out: ctx.params.value ?? '' }; }
+  },
+  template: {
+    title: 'Prompt 模板', color: 'var(--c-template)', icon: '✍',
+    inputs: [{ name: 'a', label: '{{a}}' }, { name: 'b', label: '{{b}}' }, { name: 'c', label: '{{c}}' }],
+    outputs: [{ name: 'out', label: '文字' }],
+    params: [{ key: 'template', label: '模板（可用 {{a}} {{b}} {{c}}）', kind: 'textarea', def: '{{a}}' }],
+    summary: n => clip(n.params.template, 60),
+    async run(ctx) {
+      let t = ctx.params.template ?? '';
+      for (const k of ['a', 'b', 'c'])
+        t = t.replaceAll('{{' + k + '}}', ctx.inputs[k] !== undefined ? String(ctx.inputs[k]) : '');
+      return { out: t };
+    }
+  },
+  llm: {
+    title: 'LLM 呼叫', color: 'var(--c-llm)', icon: '🧠',
+    inputs: [{ name: 'prompt', label: '提示' }],
+    outputs: [{ name: 'out', label: '回覆' }],
+    params: [
+      { key: 'system', label: 'System 提示', kind: 'textarea', def: '' },
+      { key: 'model', label: '模型（留空用預設）', kind: 'text', def: '' },
+      { key: 'temperature', label: 'Temperature', kind: 'number', def: 0.7, step: 0.1, min: 0, max: 2 },
+    ],
+    summary: n => (n.params.system ? 'sys: ' + clip(n.params.system, 40) + '\n' : '') + (n.params.model || '（預設模型）'),
+    async run(ctx) {
+      const prompt = String(ctx.inputs.prompt ?? '');
+      if (state.simulate) {
+        await sleep(500 + Math.random() * 700);
+        return { out: simulateLLM(ctx.params.system, prompt) };
+      }
+      const { endpoint, apiKey, model } = state.settings;
+      if (!endpoint) throw new Error('尚未設定 API 端點（⚙ API 設定），或改用模擬模式');
+      const messages = [];
+      if (ctx.params.system) messages.push({ role: 'system', content: ctx.params.system });
+      messages.push({ role: 'user', content: prompt });
+      const res = await fetch(endpoint.replace(/\/$/, '') + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: 'Bearer ' + apiKey } : {}) },
+        body: JSON.stringify({
+          model: ctx.params.model || model || 'gpt-4o-mini',
+          messages, temperature: Number(ctx.params.temperature ?? 0.7),
+        }),
+      });
+      if (!res.ok) throw new Error('API ' + res.status + '：' + clip(await res.text(), 200));
+      const data = await res.json();
+      return { out: data.choices?.[0]?.message?.content ?? JSON.stringify(data) };
+    }
+  },
+  code: {
+    title: '程式碼', color: 'var(--c-code)', icon: '𝑓',
+    inputs: [{ name: 'a', label: 'a' }, { name: 'b', label: 'b' }, { name: 'c', label: 'c' }],
+    outputs: [{ name: 'out', label: '結果' }],
+    params: [{ key: 'code', label: 'JavaScript（變數 a、b、c 可用，需 return）', kind: 'textarea', def: 'return a;' }],
+    summary: n => clip(n.params.code, 60),
+    async run(ctx) {
+      const fn = new Function('a', 'b', 'c', 'inputs', ctx.params.code || 'return a;');
+      const r = await fn(ctx.inputs.a, ctx.inputs.b, ctx.inputs.c, ctx.inputs);
+      return { out: r };
+    }
+  },
+  http: {
+    title: 'HTTP 請求', color: 'var(--c-http)', icon: '🌐',
+    inputs: [{ name: 'body', label: '內容' }],
+    outputs: [{ name: 'out', label: '回應' }],
+    params: [
+      { key: 'method', label: '方法', kind: 'select', options: ['GET', 'POST', 'PUT', 'DELETE'], def: 'GET' },
+      { key: 'url', label: 'URL', kind: 'text', def: '' },
+    ],
+    summary: n => n.params.method + ' ' + clip(n.params.url || '（未設定 URL）', 44),
+    async run(ctx) {
+      if (state.simulate) { await sleep(400); return { out: JSON.stringify({ simulated: true, url: ctx.params.url, echo: ctx.inputs.body ?? null }, null, 2) }; }
+      if (!ctx.params.url) throw new Error('未設定 URL');
+      const opt = { method: ctx.params.method };
+      if (ctx.params.method !== 'GET' && ctx.inputs.body !== undefined) {
+        opt.headers = { 'Content-Type': 'application/json' };
+        opt.body = typeof ctx.inputs.body === 'string' ? ctx.inputs.body : JSON.stringify(ctx.inputs.body);
+      }
+      const res = await fetch(ctx.params.url, opt);
+      const text = await res.text();
+      try { return { out: JSON.parse(text) }; } catch { return { out: text }; }
+    }
+  },
+  condition: {
+    title: '條件分支', color: 'var(--c-condition)', icon: '⑂',
+    inputs: [{ name: 'value', label: '值' }],
+    outputs: [{ name: 'true', label: '成立 →' }, { name: 'false', label: '不成立 →' }],
+    params: [{ key: 'expr', label: '判斷式（變數 value 可用）', kind: 'text', def: 'String(value).includes("是")' }],
+    summary: n => 'if ' + clip(n.params.expr, 50),
+    async run(ctx) {
+      const fn = new Function('value', 'return (' + (ctx.params.expr || 'true') + ')');
+      const ok = !!fn(ctx.inputs.value);
+      ctx.log(ok ? '判斷成立 → true 分支' : '判斷不成立 → false 分支');
+      return ok ? { true: ctx.inputs.value } : { false: ctx.inputs.value };
+    }
+  },
+  merge: {
+    title: '合併', color: 'var(--c-merge)', icon: '⇥',
+    inputs: [{ name: 'a', label: 'a' }, { name: 'b', label: 'b' }, { name: 'c', label: 'c' }],
+    outputs: [{ name: 'out', label: '第一個有值' }],
+    params: [],
+    summary: () => '取第一個抵達的有效輸入',
+    async run(ctx) {
+      for (const k of ['a', 'b', 'c']) if (ctx.inputs[k] !== undefined) return { out: ctx.inputs[k] };
+      throw new Error('沒有任何輸入有值');
+    }
+  },
+  output: {
+    title: '輸出', color: 'var(--c-output)', icon: '⏏',
+    inputs: [{ name: 'value', label: '結果' }],
+    outputs: [],
+    params: [{ key: 'name', label: '輸出名稱', kind: 'text', def: '結果' }],
+    summary: n => '顯示最終結果：' + (n.params.name || '結果'),
+    async run(ctx) {
+      ctx.log('【' + (ctx.params.name || '結果') + '】' + clip(String(ctx.inputs.value ?? ''), 400));
+      return { _display: ctx.inputs.value };
+    }
+  },
+  note: {
+    title: '註解', color: 'var(--c-note)', icon: '✎',
+    inputs: [], outputs: [],
+    params: [{ key: 'text', label: '註解內容', kind: 'textarea', def: '寫點說明…' }],
+    summary: n => n.params.text || '',
+    noRun: true,
+    async run() { return {}; }
+  },
+};
+
+/* 模擬 LLM：依提示產生像樣的假回覆 */
+function simulateLLM(system, prompt) {
+  const p = (system || '') + ' ' + prompt;
+  if (/分類|類別|classify/i.test(p)) return /退|款|錢/.test(prompt) ? '退款' : (/壞|故障|錯誤|當機/.test(prompt) ? '技術問題' : '一般詢問');
+  if (/翻譯|translate|english/i.test(p)) return '[EN] ' + clip(prompt.replace(/[^\x00-\xff]/g, m => m), 80) + ' — (simulated translation)';
+  if (/摘要|總結|summar/i.test(p)) return '摘要：' + clip(prompt, 60) + '（重點已濃縮，此為模擬輸出）';
+  if (/是否|嗎|吗|\?|？/.test(prompt)) return '是的，根據您的描述，答案是肯定的。（模擬回覆）';
+  return '這是模擬模式的 LLM 回覆。收到的提示開頭為：「' + clip(prompt, 70) + '」。切換到真實模式並設定 API 端點後，會呼叫實際模型。';
+}
+
+/* ---------- 全域狀態 ---------- */
+const state = {
+  nodes: [],          // {id, type, x, y, params}
+  edges: [],          // {id, from:{node,port}, to:{node,port}}
+  selection: null,    // {kind:'node'|'edge', id}
+  simulate: true,
+  running: false,
+  settings: { endpoint: '', apiKey: '', model: '' },
+  view: { tx: 60, ty: 40, s: 1 },
+  history: [], future: [],
+  results: {},        // nodeId -> {status, output|error}
+};
+
+try {
+  const saved = localStorage.getItem('wfg-settings');
+  if (saved) Object.assign(state.settings, JSON.parse(saved));
+} catch (e) {}
+
+const nodeById = id => state.nodes.find(n => n.id === id);
+const typeOf = n => NodeTypes[n.type];
+
+function snapshot() { return JSON.stringify({ nodes: state.nodes, edges: state.edges }); }
+function pushHistory() {
+  state.history.push(snapshot());
+  if (state.history.length > 80) state.history.shift();
+  state.future = [];
+}
+function restore(snap) {
+  const g = JSON.parse(snap);
+  state.nodes = g.nodes; state.edges = g.edges;
+  state.selection = null; state.results = {};
+  renderAll();
+}
+function undo() { if (!state.history.length) return; state.future.push(snapshot()); restore(state.history.pop()); }
+function redo() { if (!state.future.length) return; state.history.push(snapshot()); restore(state.future.pop()); }
+
+/* ---------- 畫布渲染 ---------- */
+const vp = $('#viewport'), nodeLayer = $('#nodelayer'), edgeSvg = $('#edgesvg'), wrap = $('#canvas-wrap');
+
+function applyView() {
+  const { tx, ty, s } = state.view;
+  vp.style.transform = `translate(${tx}px,${ty}px) scale(${s})`;
+  $('#hud').textContent = Math.round(s * 100) + '%';
+}
+
+function renderAll() {
+  nodeLayer.innerHTML = '';
+  for (const n of state.nodes) nodeLayer.appendChild(buildNodeEl(n));
+  renderEdges();
+  renderInspector();
+  $('#emptyhint').style.display = state.nodes.length ? 'none' : 'flex';
+  applyView();
+}
+
+function buildNodeEl(n) {
+  const t = typeOf(n);
+  const el = document.createElement('div');
+  el.className = 'node type-' + n.type;
+  el.dataset.id = n.id;
+  el.style.left = n.x + 'px'; el.style.top = n.y + 'px';
+  const r = state.results[n.id];
+  if (state.selection?.kind === 'node' && state.selection.id === n.id) el.classList.add('selected');
+  if (r) el.classList.add(r.status);
+
+  const stTxt = { running: '執行中…', success: '完成', error: '錯誤', skipped: '已跳過' }[r?.status] || '';
+  let h = `<div class="node-head"><span class="dot" style="background:${t.color}"></span>${t.icon} ${esc(n.params._label || t.title)}<span class="st">${stTxt}</span></div>`;
+  const sum = t.summary ? t.summary(n) : '';
+  if (sum) h += `<div class="node-body">${esc(sum)}</div>`;
+  h += '<div class="node-ports">';
+  const rows = Math.max(t.inputs.length, t.outputs.length);
+  for (let i = 0; i < rows; i++) {
+    if (t.inputs[i]) {
+      const connected = state.edges.some(e => e.to.node === n.id && e.to.port === t.inputs[i].name);
+      h += `<div class="port-row in"><div class="port in ${connected ? 'connected' : ''}" data-port="${t.inputs[i].name}" data-dir="in"></div>${esc(t.inputs[i].label)}</div>`;
+    }
+    if (t.outputs[i]) {
+      const connected = state.edges.some(e => e.from.node === n.id && e.from.port === t.outputs[i].name);
+      h += `<div class="port-row out">${esc(t.outputs[i].label)}<div class="port out ${connected ? 'connected' : ''}" data-port="${t.outputs[i].name}" data-dir="out"></div></div>`;
+    }
+    if (!t.inputs[i] && !t.outputs[i]) break;
+  }
+  h += '</div>';
+  if (r && r.status !== 'running' && r.status !== 'skipped') {
+    const val = r.status === 'error' ? r.error : displayVal(r.output);
+    if (val !== undefined && val !== '')
+      h += `<div class="node-result show ${r.status === 'error' ? 'err' : ''}">${esc(clip(val, 220))}</div>`;
+  }
+  el.innerHTML = h;
+  return el;
+}
+
+function displayVal(out) {
+  if (out === undefined) return '';
+  const v = out._display !== undefined ? out._display : (out.out !== undefined ? out.out : Object.values(out)[0]);
+  if (v === undefined) return '';
+  return typeof v === 'string' ? v : JSON.stringify(v);
+}
+
+/* 埠的世界座標 */
+function portPos(nodeId, portName, dir) {
+  const n = nodeById(nodeId); if (!n) return null;
+  const el = nodeLayer.querySelector(`.node[data-id="${nodeId}"] .port[data-port="${portName}"][data-dir="${dir}"]`);
+  if (!el) return null;
+  const nodeEl = el.closest('.node');
+  // offset 相對節點（port 為 absolute，offsetParent 是 .port-row 或 node）
+  let ox = 0, oy = 0, cur = el;
+  while (cur && cur !== nodeEl) { ox += cur.offsetLeft; oy += cur.offsetTop; cur = cur.offsetParent; }
+  return { x: n.x + ox + el.offsetWidth / 2, y: n.y + oy + el.offsetHeight / 2 };
+}
+
+function edgePath(p1, p2) {
+  const dx = Math.max(40, Math.abs(p2.x - p1.x) * 0.5);
+  return `M ${p1.x} ${p1.y} C ${p1.x + dx} ${p1.y}, ${p2.x - dx} ${p2.y}, ${p2.x} ${p2.y}`;
+}
+
+function renderEdges() {
+  edgeSvg.innerHTML = '';
+  for (const e of state.edges) {
+    const p1 = portPos(e.from.node, e.from.port, 'out');
+    const p2 = portPos(e.to.node, e.to.port, 'in');
+    if (!p1 || !p2) continue;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', edgePath(p1, p2));
+    path.classList.add('edge');
+    path.dataset.id = e.id;
+    if (state.selection?.kind === 'edge' && state.selection.id === e.id) path.classList.add('selected');
+    if (e._flow) path.classList.add('flow');
+    if (e._dead) path.classList.add('deadflow');
+    edgeSvg.appendChild(path);
+  }
+}
+
+/* 只更新單一節點位置（拖曳時效能） */
+function moveNodeEl(n) {
+  const el = nodeLayer.querySelector(`.node[data-id="${n.id}"]`);
+  if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; }
+  renderEdges();
+}
+
+/* ---------- 座標轉換 ---------- */
+function screenToWorld(cx, cy) {
+  const r = wrap.getBoundingClientRect();
+  const { tx, ty, s } = state.view;
+  return { x: (cx - r.left - tx) / s, y: (cy - r.top - ty) / s };
+}
+
+/* ---------- 節點庫 ---------- */
+const palList = $('#pal-list');
+for (const [type, t] of Object.entries(NodeTypes)) {
+  const d = document.createElement('div');
+  d.className = 'pal-item'; d.draggable = true; d.dataset.type = type;
+  d.innerHTML = `<span class="swatch" style="background:${t.color}"></span>${t.icon} ${t.title}`;
+  d.addEventListener('dragstart', ev => ev.dataTransfer.setData('text/node-type', type));
+  d.addEventListener('dblclick', () => addNodeAtCenter(type));
+  palList.appendChild(d);
+}
+wrap.addEventListener('dragover', ev => ev.preventDefault());
+wrap.addEventListener('drop', ev => {
+  ev.preventDefault();
+  const type = ev.dataTransfer.getData('text/node-type');
+  if (!type) return;
+  const p = screenToWorld(ev.clientX, ev.clientY);
+  addNode(type, p.x - 105, p.y - 20);
+});
+function addNodeAtCenter(type) {
+  const r = wrap.getBoundingClientRect();
+  const p = screenToWorld(r.left + r.width / 2 + (Math.random() * 60 - 30), r.top + r.height / 2 + (Math.random() * 60 - 30));
+  addNode(type, p.x - 105, p.y - 20);
+}
+function addNode(type, x, y) {
+  pushHistory();
+  const t = NodeTypes[type];
+  const params = {};
+  for (const p of t.params) params[p.key] = p.def;
+  const n = { id: uid(), type, x: Math.round(x), y: Math.round(y), params };
+  state.nodes.push(n);
+  state.selection = { kind: 'node', id: n.id };
+  renderAll();
+  return n;
+}
+
+/* ---------- 畫布互動：拖節點 / 拉線 / 平移 ---------- */
+let drag = null; // {mode:'node'|'pan'|'wire', ...}
+
+wrap.addEventListener('mousedown', ev => {
+  const portEl = ev.target.closest('.port');
+  const nodeEl = ev.target.closest('.node');
+
+  if (portEl && !state.running) {
+    const nid = nodeEl.dataset.id, port = portEl.dataset.port, dir = portEl.dataset.dir;
+    drag = { mode: 'wire', from: { node: nid, port, dir }, tempPath: null };
+    const tp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    tp.classList.add('temp'); edgeSvg.appendChild(tp); drag.tempPath = tp;
+    ev.preventDefault(); return;
+  }
+  if (nodeEl) {
+    const n = nodeById(nodeEl.dataset.id);
+    state.selection = { kind: 'node', id: n.id };
+    renderAll();
+    const p = screenToWorld(ev.clientX, ev.clientY);
+    drag = { mode: 'node', node: n, ox: p.x - n.x, oy: p.y - n.y, moved: false };
+    ev.preventDefault(); return;
+  }
+  // 空白處：平移
+  drag = { mode: 'pan', sx: ev.clientX, sy: ev.clientY, otx: state.view.tx, oty: state.view.ty };
+  if (state.selection) { state.selection = null; renderAll(); }
+});
+
+window.addEventListener('mousemove', ev => {
+  if (!drag) return;
+  if (drag.mode === 'pan') {
+    state.view.tx = drag.otx + (ev.clientX - drag.sx);
+    state.view.ty = drag.oty + (ev.clientY - drag.sy);
+    applyView();
+  } else if (drag.mode === 'node') {
+    if (!drag.moved) { pushHistory(); drag.moved = true; }
+    const p = screenToWorld(ev.clientX, ev.clientY);
+    drag.node.x = Math.round(p.x - drag.ox); drag.node.y = Math.round(p.y - drag.oy);
+    moveNodeEl(drag.node);
+  } else if (drag.mode === 'wire') {
+    const p = screenToWorld(ev.clientX, ev.clientY);
+    const anchor = portPos(drag.from.node, drag.from.port, drag.from.dir);
+    if (anchor) drag.tempPath.setAttribute('d',
+      drag.from.dir === 'out' ? edgePath(anchor, p) : edgePath(p, anchor));
+  }
+});
+
+window.addEventListener('mouseup', ev => {
+  if (!drag) return;
+  if (drag.mode === 'wire') {
+    drag.tempPath.remove();
+    const targetPort = ev.target.closest?.('.port');
+    if (targetPort) {
+      const tNode = targetPort.closest('.node').dataset.id;
+      const tName = targetPort.dataset.port, tDir = targetPort.dataset.dir;
+      let from, to;
+      if (drag.from.dir === 'out' && tDir === 'in') { from = { node: drag.from.node, port: drag.from.port }; to = { node: tNode, port: tName }; }
+      else if (drag.from.dir === 'in' && tDir === 'out') { from = { node: tNode, port: tName }; to = { node: drag.from.node, port: drag.from.port }; }
+      if (from && from.node !== to.node) {
+        pushHistory();
+        // 輸入埠只允許一條線：先移除舊的
+        state.edges = state.edges.filter(e => !(e.to.node === to.node && e.to.port === to.port));
+        state.edges.push({ id: uid(), from, to });
+        renderAll();
+      }
+    }
+  }
+  drag = null;
+});
+
+/* 點選連線 */
+edgeSvg.style.pointerEvents = 'none';
+wrap.addEventListener('click', ev => {
+  // svg path 的 pointer-events:stroke 由 CSS 控制，但 svg 容器 none → 手動命中測試
+}, true);
+// 讓 path 可點：svg 需要接收事件
+edgeSvg.style.pointerEvents = '';
+edgeSvg.addEventListener('mousedown', ev => {
+  const path = ev.target.closest('path.edge');
+  if (path) {
+    state.selection = { kind: 'edge', id: path.dataset.id };
+    renderAll();
+    ev.stopPropagation();
+  }
+});
+
+/* 縮放 */
+wrap.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  const { s } = state.view;
+  const ns = Math.min(2.5, Math.max(0.25, s * (ev.deltaY < 0 ? 1.1 : 0.9)));
+  const r = wrap.getBoundingClientRect();
+  const cx = ev.clientX - r.left, cy = ev.clientY - r.top;
+  state.view.tx = cx - (cx - state.view.tx) * (ns / s);
+  state.view.ty = cy - (cy - state.view.ty) * (ns / s);
+  state.view.s = ns;
+  applyView();
+}, { passive: false });
+
+/* ---------- 鍵盤 ---------- */
+window.addEventListener('keydown', ev => {
+  if (ev.target.matches('input,textarea,select')) return;
+  if ((ev.key === 'Delete' || ev.key === 'Backspace') && state.selection) {
+    pushHistory();
+    if (state.selection.kind === 'node') {
+      const id = state.selection.id;
+      state.nodes = state.nodes.filter(n => n.id !== id);
+      state.edges = state.edges.filter(e => e.from.node !== id && e.to.node !== id);
+    } else {
+      state.edges = state.edges.filter(e => e.id !== state.selection.id);
+    }
+    state.selection = null; renderAll();
+  }
+  if (ev.ctrlKey && ev.key.toLowerCase() === 'z') { ev.preventDefault(); undo(); }
+  if (ev.ctrlKey && (ev.key.toLowerCase() === 'y' || (ev.shiftKey && ev.key.toLowerCase() === 'z'))) { ev.preventDefault(); redo(); }
+  if (ev.ctrlKey && ev.key.toLowerCase() === 'd' && state.selection?.kind === 'node') {
+    ev.preventDefault();
+    const src = nodeById(state.selection.id);
+    if (src) {
+      pushHistory();
+      const cp = JSON.parse(JSON.stringify(src));
+      cp.id = uid(); cp.x += 40; cp.y += 40;
+      state.nodes.push(cp);
+      state.selection = { kind: 'node', id: cp.id };
+      renderAll();
+    }
+  }
+});
+
+/* ---------- 檢查器 ---------- */
+function renderInspector() {
+  const form = $('#insp-form'), empty = $('#insp-empty');
+  if (state.selection?.kind !== 'node') {
+    form.style.display = 'none'; empty.style.display = 'block'; return;
+  }
+  const n = nodeById(state.selection.id);
+  if (!n) { form.style.display = 'none'; empty.style.display = 'block'; return; }
+  const t = typeOf(n);
+  empty.style.display = 'none'; form.style.display = 'block';
+
+  let h = `<h3><span class="dot" style="width:10px;height:10px;border-radius:3px;background:${t.color};display:inline-block"></span>${t.icon} ${t.title}<span class="type-tag">#${n.id}</span></h3>`;
+  h += `<label>節點名稱（顯示用）</label><input data-pkey="_label" value="${esc(n.params._label || '')}" placeholder="${esc(t.title)}">`;
+  for (const p of t.params) {
+    h += `<label>${esc(p.label)}</label>`;
+    const v = n.params[p.key] ?? '';
+    if (p.kind === 'textarea') h += `<textarea data-pkey="${p.key}" rows="4">${esc(v)}</textarea>`;
+    else if (p.kind === 'select') h += `<select data-pkey="${p.key}">${p.options.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    else if (p.kind === 'number') h += `<input type="number" data-pkey="${p.key}" value="${esc(v)}" step="${p.step ?? 1}" ${p.min !== undefined ? `min="${p.min}"` : ''} ${p.max !== undefined ? `max="${p.max}"` : ''}>`;
+    else h += `<input data-pkey="${p.key}" value="${esc(v)}">`;
+  }
+  h += `<div class="btnrow"><button data-act="dup">⧉ 複製</button><button data-act="del" style="color:var(--red)">🗑 刪除節點</button></div>`;
+
+  const r = state.results[n.id];
+  if (r && (r.output !== undefined || r.error)) {
+    h += `<div id="insp-result"><label>最近一次執行結果</label><pre class="${r.error ? 'err' : ''}" style="${r.error ? 'color:var(--red)' : ''}">${esc(r.error || displayVal(r.output))}</pre></div>`;
+  }
+  form.innerHTML = h;
+
+  form.querySelectorAll('[data-pkey]').forEach(el => {
+    el.addEventListener('change', () => {
+      pushHistory();
+      const key = el.dataset.pkey;
+      n.params[key] = el.type === 'number' ? Number(el.value) : el.value;
+      // 重畫節點但保留檢查器焦點
+      const focused = document.activeElement;
+      nodeLayer.querySelector(`.node[data-id="${n.id}"]`)?.replaceWith(buildNodeEl(n));
+      renderEdges();
+    });
+  });
+  form.querySelector('[data-act="del"]').addEventListener('click', () => {
+    pushHistory();
+    state.nodes = state.nodes.filter(x => x.id !== n.id);
+    state.edges = state.edges.filter(e => e.from.node !== n.id && e.to.node !== n.id);
+    state.selection = null; renderAll();
+  });
+  form.querySelector('[data-act="dup"]').addEventListener('click', () => {
+    pushHistory();
+    const cp = JSON.parse(JSON.stringify(n));
+    cp.id = uid(); cp.x += 40; cp.y += 40;
+    state.nodes.push(cp);
+    state.selection = { kind: 'node', id: cp.id };
+    renderAll();
+  });
+}
+
+/* ---------- 執行引擎 ---------- */
+const logBody = $('#logbody');
+let logN = 0;
+function log(msg, cls = '', name = '') {
+  logN++;
+  const t = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="t">${t}</span>${name ? `<span class="nm">[${esc(name)}]</span> ` : ''}<span class="${cls}">${esc(msg)}</span>`;
+  logBody.appendChild(d);
+  logBody.scrollTop = logBody.scrollHeight;
+  $('#logcount').textContent = `（${logN} 筆）`;
+}
+
+function topoSort() {
+  const runnable = state.nodes.filter(n => !typeOf(n).noRun);
+  const ids = new Set(runnable.map(n => n.id));
+  const indeg = {}; runnable.forEach(n => indeg[n.id] = 0);
+  const validEdges = state.edges.filter(e => ids.has(e.from.node) && ids.has(e.to.node));
+  for (const e of validEdges) indeg[e.to.node]++;
+  const q = runnable.filter(n => indeg[n.id] === 0).map(n => n.id);
+  const order = [];
+  while (q.length) {
+    const id = q.shift(); order.push(id);
+    for (const e of validEdges) if (e.from.node === id && --indeg[e.to.node] === 0) q.push(e.to.node);
+  }
+  if (order.length !== runnable.length) return null; // 有循環
+  return order.map(id => nodeById(id));
+}
+
+async function runGraph() {
+  if (state.running) return;
+  if (!state.nodes.some(n => !typeOf(n).noRun)) { log('畫布是空的，先加些節點吧', 'wr'); return; }
+  const order = topoSort();
+  if (!order) { log('偵測到循環依賴，無法執行。請移除造成迴圈的連線。', 'er'); return; }
+
+  state.running = true;
+  $('#btn-run').disabled = true; $('#btn-run').textContent = '⏳ 執行中…';
+  $('#logpanel').classList.remove('collapsed');
+  state.results = {};
+  state.edges.forEach(e => { delete e._flow; delete e._dead; });
+  renderAll();
+  log(`── 開始執行（${state.simulate ? '模擬模式' : '真實模式'}，共 ${order.length} 個節點）──`);
+
+  const emitted = {};   // nodeId -> output object
+  const skipped = new Set();
+  const t0 = performance.now();
+  let errors = 0;
+
+  for (const n of order) {
+    const t = typeOf(n);
+    const name = n.params._label || t.title;
+    // 收集輸入：每個輸入埠取第一條「活的」連線
+    const inputs = {};
+    let deadPort = false, anyAlive = false, anyEdge = false;
+    for (const pin of t.inputs) {
+      const es = state.edges.filter(e => e.to.node === n.id && e.to.port === pin.name);
+      if (!es.length) continue;
+      anyEdge = true;
+      let got = false;
+      for (const e of es) {
+        const src = emitted[e.from.node];
+        if (!skipped.has(e.from.node) && src && Object.prototype.hasOwnProperty.call(src, e.from.port)) {
+          inputs[pin.name] = src[e.from.port];
+          e._flow = true; got = true; anyAlive = true; break;
+        } else { e._dead = true; }
+      }
+      if (!got) deadPort = true;
+    }
+    const shouldSkip = n.type === 'merge' ? (anyEdge && !anyAlive) : deadPort;
+    if (shouldSkip) {
+      skipped.add(n.id);
+      state.results[n.id] = { status: 'skipped' };
+      log('跳過（上游分支未選中）', '', name);
+      renderAll();
+      continue;
+    }
+
+    state.results[n.id] = { status: 'running' };
+    renderAll();
+    try {
+      const out = await t.run({ inputs, params: n.params, node: n, log: m => log(m, '', name), settings: state.settings });
+      state.results[n.id] = { status: 'success', output: out };
+      const shown = displayVal(out);
+      log('完成' + (shown ? '：' + clip(shown, 90) : ''), 'ok', name);
+      emitted[n.id] = out;
+    } catch (err) {
+      errors++;
+      state.results[n.id] = { status: 'error', error: err.message || String(err) };
+      skipped.add(n.id);
+      log('錯誤：' + (err.message || err), 'er', name);
+    }
+    renderAll();
+  }
+
+  const dt = ((performance.now() - t0) / 1000).toFixed(2);
+  log(`── 執行結束（${dt}s，${errors ? errors + ' 個錯誤' : '全部成功'}）──`, errors ? 'er' : 'ok');
+  state.running = false;
+  $('#btn-run').disabled = false; $('#btn-run').textContent = '▶ 執行';
+  renderAll();
+}
+
+/* ---------- 自動排版（依拓撲層級） ---------- */
+function autoLayout() {
+  const order = topoSort();
+  if (!order) { log('有循環依賴，無法自動排版', 'wr'); return; }
+  pushHistory();
+  const depth = {};
+  for (const n of order) {
+    depth[n.id] = 0;
+    for (const e of state.edges) if (e.to.node === n.id && depth[e.from.node] !== undefined)
+      depth[n.id] = Math.max(depth[n.id], depth[e.from.node] + 1);
+  }
+  const cols = {};
+  for (const n of order) {
+    const d = depth[n.id];
+    cols[d] = cols[d] || 0;
+    n.x = 40 + d * 270;
+    n.y = 40 + cols[d] * 190;
+    cols[d]++;
+  }
+  // 註解排最上方
+  let nx = 40;
+  for (const n of state.nodes.filter(n => typeOf(n).noRun)) { n.x = nx; n.y = -140; nx += 220; }
+  state.view = { tx: 60, ty: 60, s: 1 };
+  renderAll();
+}
+
+/* ---------- 匯入 / 匯出 ---------- */
+function exportJSON() {
+  const data = JSON.stringify({ version: 1, nodes: state.nodes, edges: state.edges }, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'workflow-graph.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  log('已匯出 workflow-graph.json', 'ok');
+}
+function importJSON(text) {
+  try {
+    const g = JSON.parse(text);
+    if (!Array.isArray(g.nodes) || !Array.isArray(g.edges)) throw new Error('格式不符');
+    pushHistory();
+    state.nodes = g.nodes; state.edges = g.edges;
+    state.selection = null; state.results = {};
+    renderAll();
+    log(`已匯入：${g.nodes.length} 個節點、${g.edges.length} 條連線`, 'ok');
+  } catch (e) { log('匯入失敗：' + e.message, 'er'); }
+}
+
+/* ---------- 範例工作流 ---------- */
+function G(nodes, edges) {
+  // 輔助：以簡寫建圖  nodes: [key,type,x,y,params]  edges: ['key.port','key.port']
+  const map = {};
+  const ns = nodes.map(([key, type, x, y, params]) => {
+    const id = uid(); map[key] = id;
+    return { id, type, x, y, params: params || {} };
+  });
+  const es = edges.map(([f, t]) => {
+    const [fn, fp] = f.split('.'), [tn, tp] = t.split('.');
+    return { id: uid(), from: { node: map[fn], port: fp }, to: { node: map[tn], port: tp } };
+  });
+  return { nodes: ns, edges: es };
+}
+
+const Examples = [
+  {
+    name: '① 簡單問答（輸入 → 模板 → LLM → 輸出）',
+    build: () => G([
+      ['q', 'input', 40, 120, { value: '台北為什麼常下雨？', _label: '使用者問題' }],
+      ['tpl', 'template', 310, 120, { template: '請用兩句話回答以下問題，語氣親切：\n\n{{a}}' }],
+      ['llm', 'llm', 580, 120, { system: '你是簡潔的百科助理。' }],
+      ['out', 'output', 850, 120, { name: '答案' }],
+      ['note', 'note', 40, -60, { text: '最基本的流程：問題套上 Prompt 模板後丟給 LLM。點各節點可在右側改參數。' }],
+    ], [['q.out', 'tpl.a'], ['tpl.out', 'llm.prompt'], ['llm.out', 'out.value']]),
+  },
+  {
+    name: '② 客服分流（LLM 分類 → 條件分支 → 合併）',
+    build: () => G([
+      ['msg', 'input', 30, 200, { value: '我上週買的鍵盤壞了，可以退錢嗎？', _label: '客戶訊息' }],
+      ['cls', 'llm', 290, 200, { system: '你是客服分類器。只回覆一個詞：退款、技術問題、或一般詢問。', _label: 'LLM 分類' }],
+      ['cond', 'condition', 555, 200, { expr: 'String(value).includes("退款")' }],
+      ['tpl1', 'template', 810, 40, { template: '客戶要求退款：「{{a}}」\n請草擬同理且明確的退款流程回覆。', _label: '退款模板' }],
+      ['tpl2', 'template', 810, 400, { template: '客戶問題：「{{a}}」\n請草擬一般客服回覆。', _label: '一般模板' }],
+      ['llm1', 'llm', 1070, 40, { system: '你是資深客服。', _label: '退款回覆' }],
+      ['llm2', 'llm', 1070, 400, { system: '你是資深客服。', _label: '一般回覆' }],
+      ['mg', 'merge', 1330, 200, {}],
+      ['out', 'output', 1560, 200, { name: '客服回覆' }],
+      ['note', 'note', 30, -30, { text: '條件節點只讓一條分支通過；未選中的分支整條自動「跳過」，最後由合併節點取有值的那邊。' }],
+    ], [
+      ['msg.out', 'cls.prompt'], ['cls.out', 'cond.value'],
+      ['cond.true', 'tpl1.a'], ['cond.false', 'tpl2.a'],
+      ['msg.out', 'tpl1.b'], ['msg.out', 'tpl2.b'],
+      ['tpl1.out', 'llm1.prompt'], ['tpl2.out', 'llm2.prompt'],
+      ['llm1.out', 'mg.a'], ['llm2.out', 'mg.b'], ['mg.out', 'out.value'],
+    ]),
+  },
+  {
+    name: '③ 並行處理（摘要＋翻譯 → 程式碼合成）',
+    build: () => G([
+      ['doc', 'input', 30, 200, { value: '生成式 AI 正在改變軟體開發：從自動補全到整段函式生成，工程師的角色逐漸從「逐行撰寫」轉向「設計與審查」。', _label: '原文' }],
+      ['sum', 'llm', 300, 40, { system: '把輸入摘要成一句話。', _label: 'LLM 摘要' }],
+      ['tr', 'llm', 300, 380, { system: '把輸入翻譯成英文。', _label: 'LLM 翻譯' }],
+      ['mix', 'code', 570, 200, { code: "return '【摘要】' + a + '\\n【英譯】' + b;", _label: '合成結果' }],
+      ['out', 'output', 840, 200, { name: '報告' }],
+      ['note', 'note', 30, -20, { text: '同一個輸出埠可以接多條線（扇出），兩個 LLM 各自處理後由程式碼節點組合。' }],
+    ], [
+      ['doc.out', 'sum.prompt'], ['doc.out', 'tr.prompt'],
+      ['sum.out', 'mix.a'], ['tr.out', 'mix.b'], ['mix.out', 'out.value'],
+    ]),
+  },
+];
+
+/* ---------- 工具列 ---------- */
+$('#btn-run').addEventListener('click', runGraph);
+$('#btn-layout').addEventListener('click', autoLayout);
+$('#btn-undo').addEventListener('click', undo);
+$('#btn-redo').addEventListener('click', redo);
+$('#btn-clear').addEventListener('click', () => {
+  if (!state.nodes.length) return;
+  pushHistory();
+  state.nodes = []; state.edges = []; state.results = {}; state.selection = null;
+  renderAll();
+});
+$('#btn-export').addEventListener('click', exportJSON);
+$('#btn-import').addEventListener('click', () => $('#file-import').click());
+$('#file-import').addEventListener('change', ev => {
+  const f = ev.target.files[0];
+  if (f) f.text().then(importJSON);
+  ev.target.value = '';
+});
+
+/* 模擬模式切換 */
+const tgSim = $('#tg-sim'), cbSim = $('#cb-sim');
+tgSim.addEventListener('click', ev => {
+  if (ev.target !== cbSim) cbSim.checked = !cbSim.checked;
+  state.simulate = cbSim.checked;
+  tgSim.classList.toggle('on', state.simulate);
+  log(state.simulate ? '已切換到模擬模式（不呼叫真實 API）' : '已切換到真實模式（LLM 節點將呼叫 API）', 'wr');
+});
+
+/* 範例選單 */
+const exMenu = $('#examples-menu');
+Examples.forEach((ex, i) => {
+  const b = document.createElement('button');
+  b.textContent = ex.name;
+  b.addEventListener('click', () => {
+    exMenu.classList.remove('show');
+    pushHistory();
+    const g = ex.build();
+    state.nodes = g.nodes; state.edges = g.edges;
+    state.selection = null; state.results = {};
+    renderAll();
+    state.view = { tx: 40, ty: 100, s: state.nodes.length > 7 ? 0.72 : 0.95 };
+    applyView();
+    log('已載入範例：' + ex.name, 'ok');
+  });
+  exMenu.appendChild(b);
+});
+$('#btn-examples').addEventListener('click', ev => {
+  const r = ev.currentTarget.getBoundingClientRect();
+  exMenu.style.left = r.left + 'px'; exMenu.style.top = (r.bottom + 4) + 'px';
+  exMenu.classList.toggle('show');
+  ev.stopPropagation();
+});
+document.addEventListener('click', () => exMenu.classList.remove('show'));
+
+/* API 設定 modal */
+const mask = $('#settings-mask');
+$('#btn-settings').addEventListener('click', () => {
+  $('#set-endpoint').value = state.settings.endpoint;
+  $('#set-apikey').value = state.settings.apiKey;
+  $('#set-model').value = state.settings.model;
+  mask.classList.add('show');
+});
+$('#set-cancel').addEventListener('click', () => mask.classList.remove('show'));
+$('#set-save').addEventListener('click', () => {
+  state.settings.endpoint = $('#set-endpoint').value.trim();
+  state.settings.apiKey = $('#set-apikey').value.trim();
+  state.settings.model = $('#set-model').value.trim();
+  try { localStorage.setItem('wfg-settings', JSON.stringify(state.settings)); } catch (e) {}
+  mask.classList.remove('show');
+  log('API 設定已儲存', 'ok');
+});
+mask.addEventListener('mousedown', ev => { if (ev.target === mask) mask.classList.remove('show'); });
+
+/* 日誌收合 */
+$('#loghead').addEventListener('click', () => $('#logpanel').classList.toggle('collapsed'));
+
+/* ---------- 啟動 ---------- */
+(function init() {
+  const g = Examples[1].build();          // 預設載入客服分流範例
+  state.nodes = g.nodes; state.edges = g.edges;
+  renderAll();
+  state.view = { tx: 40, ty: 110, s: 0.72 };
+  applyView();
+  log('歡迎使用 WorkFlowGraph。目前為模擬模式，直接按 ▶ 執行 就能看到資料流動。');
+})();
+</script>
+</body>
+</html>

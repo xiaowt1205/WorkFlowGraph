@@ -1,0 +1,12 @@
+{
+  "name": "workflow-graph-app",
+  "version": "0.2.0",
+  "description": "節點式 Graph Engineering 工作流編輯器 — 本地 Claude 驅動",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "stop": "node scripts/ctl.js stop",
+    "restart": "node scripts/ctl.js restart"
+  },
+  "engines": { "node": ">=18" }
+}

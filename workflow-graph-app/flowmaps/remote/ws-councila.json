@@ -1,0 +1,543 @@
+{
+  "id": "ws-councila",
+  "name": "SkillCouncil-(A)事實與範圍",
+  "createdAt": "2026-08-26T04:00:00.000Z",
+  "updatedAt": "2026-10-05T04:09:25.633Z",
+  "graph": {
+    "version": 1,
+    "nodes": [
+      {
+        "id": "nnote",
+        "type": "note",
+        "x": -40,
+        "y": -300,
+        "params": {
+          "text": "【XinCouncil 段 A：事實蒐集 → 會議定 scope】\n單獨執行：改「目標模組」「使用情境」「專案根目錄」三個節點輸入的預設值即可\n（專案根目錄已接線到所有程式碼查詢節點，不用逐顆設）。\n被「XinCouncil 全流程」引用時，三個值由頂層輸入餵入。\n產出：outputs/01-facts.md、outputs/02-scope.md\n單獨跑完請審閱「scope 決議」輸出——這是你的否決點：\n不滿意就改輸入重跑；滿意再執行段 B。\n—\n成本優化（2026-08-26）：三個程式碼查詢共用「讀碼」會話（程式碼只讀一次，後面以快取重用）\n並改用 haiku（事實蒐集屬機械掃描；facts 整併與 scope 會議等判斷類仍用預設模型）。"
+        }
+      },
+      {
+        "id": "ninmod",
+        "type": "modin",
+        "x": -40,
+        "y": 40,
+        "params": {
+          "_label": "目標模組",
+          "value": "（模組名稱與相對路徑，例：訂單解析 src/order）"
+        }
+      },
+      {
+        "id": "ninctx",
+        "type": "modin",
+        "x": -40,
+        "y": 200,
+        "params": {
+          "_label": "使用情境",
+          "value": "日常開發查閱＋AI agent 自動維護"
+        }
+      },
+      {
+        "id": "ninproj",
+        "type": "modin",
+        "x": -40,
+        "y": 360,
+        "params": {
+          "_label": "專案根目錄",
+          "value": "（專案根目錄絕對路徑，例：E:\\github\\myproj）"
+        }
+      },
+      {
+        "id": "ncodereq",
+        "type": "code",
+        "x": 260,
+        "y": 360,
+        "params": {
+          "_label": "錨點請求",
+          "code": "return JSON.stringify({ path: a });"
+        }
+      },
+      {
+        "id": "nhttp",
+        "type": "http",
+        "x": 520,
+        "y": 360,
+        "params": {
+          "_label": "版本錨點",
+          "method": "POST",
+          "url": "http://localhost:3000/api/version-anchor"
+        }
+      },
+      {
+        "id": "ncodetxt",
+        "type": "code",
+        "x": 780,
+        "y": 360,
+        "params": {
+          "_label": "錨點文字",
+          "code": "return '## 版本錨點\\n```json\\n' + (typeof a === 'string' ? a : JSON.stringify(a, null, 1)) + '\\n```';"
+        }
+      },
+      {
+        "id": "ntpliface",
+        "type": "template",
+        "x": 260,
+        "y": 100,
+        "params": {
+          "_label": "介面面提問",
+          "template": "目標模組：@目標模組\n\n請盤點此模組的「介面面」事實：公開 API、函式與類別簽名、輸入輸出型別、對外匯出的東西（export / public / 介面定義）。\n\n格式：每條事實一行，附 檔案:行號 佐證（路徑相對於專案根目錄）。不確定的事實標 [?]。只列你用唯讀工具實際查證到的內容。"
+        }
+      },
+      {
+        "id": "ncqiface",
+        "type": "codequery",
+        "x": 520,
+        "y": 100,
+        "params": {
+          "_label": "介面面",
+          "folder": "",
+          "model": "haiku",
+          "session": "讀碼"
+        }
+      },
+      {
+        "id": "ntplstruct",
+        "type": "template",
+        "x": 260,
+        "y": 480,
+        "params": {
+          "_label": "結構面提問",
+          "template": "目標模組：@目標模組\n\n請盤點此模組的「結構面」事實：內部資料流、狀態管理、對外相依（import 了什麼、被專案中誰 import）、設定與環境變數。\n\n格式：每條事實一行，附 檔案:行號 佐證（路徑相對於專案根目錄）。不確定的事實標 [?]。只列你用唯讀工具實際查證到的內容。"
+        }
+      },
+      {
+        "id": "ncqstruct",
+        "type": "codequery",
+        "x": 520,
+        "y": 480,
+        "params": {
+          "_label": "結構面",
+          "folder": "",
+          "model": "haiku",
+          "session": "讀碼"
+        }
+      },
+      {
+        "id": "ntplconv",
+        "type": "template",
+        "x": 260,
+        "y": 860,
+        "params": {
+          "_label": "慣例陷阱面提問",
+          "template": "目標模組：@目標模組\n\n請盤點此模組的「慣例與陷阱面」事實：測試怎麼寫、錯誤處理模式、命名慣例、TODO / FIXME / HACK 註解，以及從註解密度與 workaround 痕跡推測的高風險熱點（本節點無 shell，不做 git log 分析——推測就明說是推測）。\n\n格式：每條事實一行，附 檔案:行號 佐證（路徑相對於專案根目錄）。不確定的事實標 [?]。只列你用唯讀工具實際查證到的內容。"
+        }
+      },
+      {
+        "id": "ncqconv",
+        "type": "codequery",
+        "x": 520,
+        "y": 860,
+        "params": {
+          "_label": "慣例陷阱面",
+          "folder": "",
+          "model": "haiku",
+          "session": "讀碼"
+        }
+      },
+      {
+        "id": "nmerge",
+        "type": "merge",
+        "x": 800,
+        "y": 200,
+        "params": {
+          "_label": "素材彙整",
+          "mode": "全部串接",
+          "sep": "空一行",
+          "headers": "是"
+        }
+      },
+      {
+        "id": "nllmfacts",
+        "type": "llm",
+        "x": 1060,
+        "y": 200,
+        "params": {
+          "_label": "facts整併",
+          "constraint": "僅回答內容",
+          "model": "預設",
+          "system": "你負責把多個視角蒐集到的模組事實整併成一份 01-facts.md。規則：(1) 事實只從素材來，不得新增素材沒有的陳述；(2) 去重、按主題分節，每條事實一行並保留 檔案:行號 引用；(3) 不確定或互相矛盾的標 [?]；(4) 文件開頭放素材中的版本錨點區塊。輸出 01-facts.md 全文。"
+        }
+      },
+      {
+        "id": "nfofacts",
+        "type": "fileout",
+        "x": 1320,
+        "y": 120,
+        "params": {
+          "_label": "存01-facts",
+          "name": "01-facts.md",
+          "type": "md",
+          "folder": "",
+          "style": ""
+        }
+      },
+      {
+        "id": "nfiroles",
+        "type": "filein",
+        "x": 800,
+        "y": 560,
+        "params": {
+          "_label": "會議角色規則",
+          "path": "C:\\Users\\justin.xiao\\Desktop\\XinSkillCouncil\\xin-skill-council\\references\\council-roles.md"
+        }
+      },
+      {
+        "id": "ntplscope",
+        "type": "template",
+        "x": 1060,
+        "y": 480,
+        "params": {
+          "_label": "會議素材",
+          "template": "依下列「角色與議程」召開會議，決定模組 skill 的 scope。這是判斷性討論：所有事實引用以 facts 文件為準，會議中出現 facts 沒有的陳述一律標記為 gap，不採信、不展開。每個角色發言 3~5 句、立場鮮明、允許反駁；每議題最多兩輪交鋒即收斂。\n\n【角色與議程】\n@會議角色規則\n\n【使用情境】\n@使用情境\n\n【目標模組】\n@目標模組\n\n【facts 文件】\n@facts整併\n\n請完整走完議程，最後依「產出格式（02-scope.md）」輸出 02-scope.md 全文（含推導 pattern、涵蓋/排除範圍、坑清單、章節骨架、標記給拷問階段的 gap）。"
+        }
+      },
+      {
+        "id": "nllmscope",
+        "type": "llm",
+        "x": 1320,
+        "y": 480,
+        "params": {
+          "_label": "scope會議",
+          "constraint": "僅回答內容",
+          "model": "預設",
+          "system": "你要逐一扮演會議中的五個角色（主持人／模組維護者／API 使用者／新人／文件工程師）完成議程。鐵律：只使用 facts 文件中的事實；任何 facts 沒有的陳述標記為 gap。只輸出 02-scope.md 全文。"
+        }
+      },
+      {
+        "id": "nfoscope",
+        "type": "fileout",
+        "x": 1580,
+        "y": 400,
+        "params": {
+          "_label": "存02-scope",
+          "name": "02-scope.md",
+          "type": "md",
+          "folder": "",
+          "style": ""
+        }
+      },
+      {
+        "id": "noutscope",
+        "type": "output",
+        "x": 1580,
+        "y": 560,
+        "params": {
+          "_label": "scope決議",
+          "name": "scope 決議（請審閱——你的否決點）"
+        }
+      },
+      {
+        "id": "nmodscope",
+        "type": "modout",
+        "x": 1580,
+        "y": 720,
+        "params": {
+          "_label": "scope決議產出"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "from": {
+          "node": "ninproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncodereq",
+          "port": "a"
+        }
+      },
+      {
+        "id": "e2",
+        "from": {
+          "node": "ncodereq",
+          "port": "out"
+        },
+        "to": {
+          "node": "nhttp",
+          "port": "body"
+        }
+      },
+      {
+        "id": "e3",
+        "from": {
+          "node": "nhttp",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncodetxt",
+          "port": "a"
+        }
+      },
+      {
+        "id": "e4",
+        "from": {
+          "node": "ninmod",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntpliface",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e5",
+        "from": {
+          "node": "ntpliface",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqiface",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e6",
+        "from": {
+          "node": "ninproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqiface",
+          "port": "folder"
+        }
+      },
+      {
+        "id": "e7",
+        "from": {
+          "node": "ninmod",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplstruct",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e8",
+        "from": {
+          "node": "ntplstruct",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqstruct",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e9",
+        "from": {
+          "node": "ninproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqstruct",
+          "port": "folder"
+        }
+      },
+      {
+        "id": "e10",
+        "from": {
+          "node": "ninmod",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplconv",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e11",
+        "from": {
+          "node": "ntplconv",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqconv",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e12",
+        "from": {
+          "node": "ninproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqconv",
+          "port": "folder"
+        }
+      },
+      {
+        "id": "e13",
+        "from": {
+          "node": "ncodetxt",
+          "port": "out"
+        },
+        "to": {
+          "node": "nmerge",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e14",
+        "from": {
+          "node": "ncqiface",
+          "port": "out"
+        },
+        "to": {
+          "node": "nmerge",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e15",
+        "from": {
+          "node": "ncqstruct",
+          "port": "out"
+        },
+        "to": {
+          "node": "nmerge",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e16",
+        "from": {
+          "node": "ncqconv",
+          "port": "out"
+        },
+        "to": {
+          "node": "nmerge",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e17",
+        "from": {
+          "node": "nmerge",
+          "port": "out"
+        },
+        "to": {
+          "node": "nllmfacts",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e18",
+        "from": {
+          "node": "nllmfacts",
+          "port": "out"
+        },
+        "to": {
+          "node": "nfofacts",
+          "port": "content"
+        }
+      },
+      {
+        "id": "e19",
+        "from": {
+          "node": "nfiroles",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplscope",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e20",
+        "from": {
+          "node": "ninctx",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplscope",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e21",
+        "from": {
+          "node": "ninmod",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplscope",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e22",
+        "from": {
+          "node": "nllmfacts",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplscope",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e23",
+        "from": {
+          "node": "ntplscope",
+          "port": "out"
+        },
+        "to": {
+          "node": "nllmscope",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e24",
+        "from": {
+          "node": "nllmscope",
+          "port": "out"
+        },
+        "to": {
+          "node": "nfoscope",
+          "port": "content"
+        }
+      },
+      {
+        "id": "e25",
+        "from": {
+          "node": "nllmscope",
+          "port": "out"
+        },
+        "to": {
+          "node": "noutscope",
+          "port": "value"
+        }
+      },
+      {
+        "id": "e26",
+        "from": {
+          "node": "nllmscope",
+          "port": "out"
+        },
+        "to": {
+          "node": "nmodscope",
+          "port": "value"
+        }
+      }
+    ]
+  },
+  "view": {
+    "tx": 60,
+    "ty": 40,
+    "s": 0.62
+  },
+  "projectId": "pj-mtaznoc9wa3aii",
+  "order": 1787716799000
+}

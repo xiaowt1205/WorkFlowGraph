@@ -1,0 +1,3385 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:,">
+<title>WorkFlowGraph — 本地 Claude 工作流編輯器</title>
+<style>
+:root{
+  --bg:#0e1320; --panel:#151b2c; --panel2:#1a2136; --line:#28324d;
+  --text:#dce4f5; --dim:#8b96b5; --faint:#5a6584;
+  --accent:#5b8cff; --green:#3ecf8e; --red:#ff6b6b; --amber:#ffb02e;
+  --node-bg:#1b2338; --node-head:#222c47;
+  --c-input:#3ecf8e; --c-template:#b78bff; --c-llm:#5b8cff; --c-code:#ffb02e;
+  --c-http:#4dd0e1; --c-web:#2fd3b5; --c-filein:#9ccc65; --c-fileout:#f06eaa; --c-condition:#ff8a5c; --c-merge:#9aa7c7; --c-output:#ff6b9d; --c-note:#6b7694; --c-subflow:#ffe066; --c-modin:#c3e653; --c-modout:#e0995e; --c-codequery:#c86bfa; --c-folderlink:#c9b458; --c-shell:#eef2ff;
+  --radius:10px;
+  font-size:14px;
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%; overflow:hidden}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:"Segoe UI","Noto Sans TC","PingFang TC",system-ui,sans-serif;
+  display:flex; flex-direction:column;
+}
+button{
+  background:var(--panel2); color:var(--text); border:1px solid var(--line);
+  border-radius:6px; padding:5px 10px; cursor:pointer; font:inherit; font-size:13px;
+  display:inline-flex; align-items:center; gap:5px; white-space:nowrap;
+}
+button:hover{border-color:var(--accent); color:#fff}
+button.primary{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600}
+button.primary:hover{filter:brightness(1.12)}
+button:disabled{opacity:.45; cursor:not-allowed}
+input,select,textarea{
+  background:#101627; color:var(--text); border:1px solid var(--line);
+  border-radius:6px; padding:6px 8px; font:inherit; font-size:13px; width:100%;
+}
+textarea{resize:vertical; min-height:64px; font-family:ui-monospace,Consolas,monospace; line-height:1.45}
+input:focus,select:focus,textarea:focus{outline:none; border-color:var(--accent)}
+label{display:block; font-size:12px; color:var(--dim); margin:10px 0 4px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#2a3450; border-radius:5px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- Topbar ---------- */
+#topbar{
+  display:flex; align-items:center; gap:8px; padding:8px 12px;
+  background:var(--panel); border-bottom:1px solid var(--line); z-index:30; flex-wrap:wrap;
+}
+#topbar .brand{font-weight:700; font-size:15px; margin-right:6px; letter-spacing:.3px}
+#topbar .brand b{color:var(--accent)}
+#topbar .sep{width:1px; height:20px; background:var(--line); margin:0 4px}
+#topbar .spacer{flex:1}
+.toggle{display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--dim);
+  border:1px solid var(--line); border-radius:6px; padding:4px 10px; cursor:pointer; user-select:none}
+.toggle input{width:auto}
+.toggle.on{color:var(--green); border-color:var(--green)}
+/* 危險能力的開關：開啟時用琥珀色，跟「模擬模式開著（安全）」的綠色明確區分 */
+.toggle.armed{color:var(--amber); border-color:var(--amber)}
+#topbar .mdl{display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--dim);
+  border:1px solid var(--line); border-radius:6px; padding:3px 8px; margin:0}
+#topbar .mdl select{width:auto; padding:2px 4px; font-size:12px; border:none; background:transparent}
+
+/* ---------- Main layout ---------- */
+#main{flex:1; display:flex; min-height:0; position:relative}
+
+/* palette */
+#palette{
+  width:172px; background:var(--panel); border-right:1px solid var(--line);
+  padding:10px; overflow-y:auto; flex-shrink:0;
+}
+#palette h3{font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:1px; margin:6px 0 8px}
+.pal-item{
+  display:flex; align-items:center; gap:8px; padding:8px 9px; margin-bottom:6px;
+  background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+  cursor:grab; font-size:13px; user-select:none;
+}
+.pal-item:hover{border-color:var(--accent); transform:translateX(2px)}
+.pal-item .swatch{width:10px; height:10px; border-radius:3px; flex-shrink:0}
+.pal-hint{font-size:11px; color:var(--faint); line-height:1.5; margin-top:10px}
+
+/* canvas */
+#canvas-wrap{flex:1; position:relative; overflow:hidden; background:
+  radial-gradient(circle, #232c47 1px, transparent 1px) 0 0/26px 26px, var(--bg);
+  cursor:default}
+#viewport{position:absolute; top:0; left:0; transform-origin:0 0}
+#edgesvg{position:absolute; top:0; left:0; width:10px; height:10px; overflow:visible; pointer-events:none}
+#edgesvg path.edge{fill:none; stroke:#4a5878; stroke-width:2.2; pointer-events:stroke; cursor:pointer}
+#edgesvg path.edge:hover{stroke:var(--accent)}
+#edgesvg path.edge.selected{stroke:var(--accent); stroke-width:3}
+#edgesvg path.edge.flow{stroke:var(--green); stroke-dasharray:6 5; animation:flowdash .5s linear infinite}
+#edgesvg path.edge.deadflow{stroke:#5c4350; stroke-dasharray:2 7; stroke-width:1.8; opacity:.9}
+#edgesvg text.edgemark{fill:#a06a7c; font-size:13px; pointer-events:none; user-select:none}
+#edgesvg path.temp{fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:5 4}
+@keyframes flowdash{to{stroke-dashoffset:-11}}
+#hud{position:absolute; left:12px; bottom:10px; font-size:11px; color:var(--faint);
+  background:rgba(14,19,32,.75); padding:4px 9px; border-radius:6px; pointer-events:none}
+/* 執行控制浮動窗（預設右下角，可拖標題列移動）——參考 Unity 粒子播放器：
+   標題列 + 按鈕列 + 唯讀資訊列。z-index 70：在節點與膠框(60)之上、選單(120)之下 */
+#runpanel{position:absolute; right:12px; bottom:12px; width:184px; z-index:70;
+  background:rgba(21,27,44,.95); border:1px solid var(--line); border-radius:8px;
+  box-shadow:0 10px 30px rgba(0,0,0,.45); user-select:none; font-size:12px}
+#runpanel.dragging{border-color:var(--accent)}
+#rp-head{display:flex; align-items:center; gap:6px; padding:5px 9px; color:var(--dim);
+  font-size:11px; letter-spacing:.5px; border-bottom:1px solid var(--line); cursor:move}
+#rp-head .rp-grip{color:var(--faint)}
+#runpanel .rp-body{padding:8px 9px; display:flex; flex-direction:column; gap:6px}
+#runpanel .rp-row{display:flex; gap:6px}
+#runpanel button{flex:1; justify-content:center; padding:5px 6px; font-size:12px}
+#runpanel .rp-info{display:flex; align-items:baseline; justify-content:space-between;
+  gap:8px; color:var(--faint); font-size:11px}
+#runpanel .rp-info b{font-weight:600; color:var(--dim)}
+#runpanel .rp-info b.run{color:var(--accent)} #runpanel .rp-info b.ok{color:var(--green)}
+#runpanel .rp-info b.wr{color:var(--amber)}   #runpanel .rp-info b.er{color:var(--red)}
+#emptyhint{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  color:var(--faint); font-size:14px; pointer-events:none; text-align:center; line-height:2}
+#canvas-wrap.panready{cursor:grab}
+#canvas-wrap.panning{cursor:grabbing}
+/* 框選膠框 */
+#marquee{position:absolute; display:none; z-index:60; pointer-events:none; border-radius:2px;
+  border:1px solid var(--accent); background:rgba(91,140,255,.12)}
+/* 右鍵節點清單 */
+#ctxmenu{position:fixed; display:none; z-index:120; width:248px; padding:6px;
+  background:var(--panel2); border:1px solid var(--line); border-radius:10px;
+  box-shadow:0 14px 40px rgba(0,0,0,.55)}
+#ctxmenu.show{display:block}
+#ctxmenu .ctx-search{width:100%; margin-bottom:6px}
+#ctxmenu .ctx-list{max-height:330px; overflow-y:auto}
+#ctxmenu .ctx-item{display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:6px;
+  font-size:13px; cursor:pointer; user-select:none}
+#ctxmenu .ctx-item.active,#ctxmenu .ctx-item:hover{background:rgba(91,140,255,.18)}
+#ctxmenu .ctx-item .swatch{width:10px; height:10px; border-radius:3px; flex-shrink:0}
+#ctxmenu .ctx-empty{padding:9px; font-size:12px; color:var(--faint)}
+#ctx-hint{display:none; font-size:11px; color:var(--faint); line-height:1.5; padding:2px 4px 7px}
+#ctxmenu.wire #ctx-hint{display:block}
+/* 節點右鍵指令選單 */
+#nodemenu{position:fixed; z-index:121; min-width:198px}
+.menu .mhead{font-size:11px; color:var(--faint); padding:3px 10px 6px; margin-bottom:4px;
+  border-bottom:1px solid var(--line); max-width:250px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap}
+.menu .msep{height:1px; background:var(--line); margin:4px 0}
+.menu button{align-items:center; gap:8px; font-size:13px; cursor:pointer}
+.menu button[disabled]{opacity:.38; cursor:default}
+.menu button[disabled]:hover{background:none}
+.menu button.danger:hover{background:rgba(255,92,112,.14); color:var(--red)}
+.menu .mk{margin-left:auto; font-size:11px; color:var(--faint)}
+.menu .rn-input{width:100%; margin:2px 0}
+
+/* ---------- Node ---------- */
+.node{
+  position:absolute; width:210px; background:var(--node-bg);
+  border:1.5px solid var(--line); border-radius:var(--radius);
+  box-shadow:0 4px 16px rgba(0,0,0,.35); user-select:none;
+  /* z-index 不是裝飾：有了它每顆節點才自成一個 stacking context，
+     埠的 z-index:2 才只在自己這顆節點內生效。少了這行，所有埠會浮到
+     全部節點之上——節點重疊時，後面那顆的埠會畫在前面那顆的卡片上。 */
+  z-index:1;
+}
+/* 選取中的節點浮到最上層：節點重疊時，先點一下就能拿到被壓住的埠 */
+.node.selected{border-color:var(--accent); box-shadow:0 0 0 3px rgba(91,140,255,.22), 0 4px 16px rgba(0,0,0,.4);
+  z-index:3}
+.node.running{border-color:var(--accent); animation:pulse 1s ease-in-out infinite}
+.node.success{border-color:var(--green)}
+.node.error{border-color:var(--red)}
+.node.skipped{opacity:.45; border-style:dashed}
+/* 節點用量列（AI 節點執行後） */
+.node-meter{
+  display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+  padding:4px 10px 6px; font-size:10.5px; color:var(--faint);
+  border-top:1px dashed var(--line); letter-spacing:.2px;
+}
+.node-meter b{font-weight:600; color:#8fa2c8}
+.node-meter .sep{opacity:.4}
+#usage-total{font-size:11.5px; color:var(--faint); white-space:nowrap}
+#usage-total b{color:#8fa2c8; font-weight:600}
+.usage-grid{display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:12px; margin-top:4px}
+.usage-grid .k{color:var(--faint)}
+@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(91,140,255,.15)}}
+.node-head{
+  display:flex; align-items:center; gap:7px; padding:8px 10px;
+  background:var(--node-head); border-radius:9px 9px 0 0; cursor:grab;
+  font-weight:600; font-size:13px; border-bottom:1px solid var(--line);
+}
+.node-head .dot{width:9px; height:9px; border-radius:3px; flex-shrink:0}
+.node-head .st{margin-left:auto; font-size:11px; font-weight:400; color:var(--dim);
+  font-variant-numeric:tabular-nums}
+.node.running .st{color:var(--accent)} .node.success .st{color:var(--green)}
+.node.error .st{color:var(--red)}
+.node-body{padding:7px 10px; font-size:11.5px; color:var(--dim); line-height:1.5;
+  max-height:72px; overflow:hidden; text-overflow:ellipsis; white-space:pre-wrap; word-break:break-all}
+.node-ports{padding:2px 0 8px}
+.port-row{position:relative; height:22px; display:flex; align-items:center; font-size:11px; color:var(--dim)}
+.port-row.in{padding-left:16px} .port-row.out{justify-content:flex-end; padding-right:16px}
+.port{
+  position:absolute; width:12px; height:12px; border-radius:50%;
+  background:#0e1320; border:2px solid #63719a; cursor:crosshair;
+  z-index:2;            /* 只在所屬節點內生效（見 .node 的 z-index） */
+}
+.port:hover{border-color:#fff; transform:scale(1.25)}
+.port.in{left:-7px} .port.out{right:-7px}
+.port.connected{background:#63719a}
+.port.multi{width:14px; height:14px; border-color:#9db3e8; box-shadow:0 0 0 2px rgba(157,179,232,.25)}
+.port.multi.connected{background:#9db3e8}
+.srcs{display:flex; flex-wrap:wrap; gap:6px; margin-top:4px}
+.src-chip{display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border:1px solid var(--line);
+  border-radius:20px; font-size:12px; cursor:pointer; background:var(--panel2); user-select:none}
+.src-chip:hover{filter:brightness(1.25)}
+.src-chip i{width:8px; height:8px; border-radius:2px; display:inline-block; flex-shrink:0}
+.srcs-empty{font-size:12px; color:var(--faint); margin-top:4px}
+.srcs-warn{font-size:11px; color:var(--amber); margin-top:5px}
+.node-result{
+  margin:0 8px 8px; padding:6px 8px; background:#101627; border:1px solid var(--line);
+  border-radius:6px; font-size:11px; font-family:ui-monospace,Consolas,monospace;
+  color:var(--green); max-height:80px; overflow:auto; white-space:pre-wrap; word-break:break-all; display:none;
+}
+.node-result.show{display:block}
+.node-result.err{color:var(--red)}
+.node-result.skip{color:#a08a94; font-family:inherit}
+.node.type-note{width:190px; background:#1c2130; border-style:dashed}
+.node.type-note .node-body{color:#a7b1cc; max-height:200px}
+
+/* ---------- Inspector ---------- */
+#inspector{
+  width:295px; background:var(--panel); border-left:1px solid var(--line);
+  overflow-y:auto; flex-shrink:0; padding:14px;
+}
+#inspector h3{font-size:13px; margin-bottom:2px; display:flex; align-items:center; gap:8px}
+#inspector .type-tag{font-size:11px; color:var(--dim)}
+#inspector .empty{color:var(--faint); font-size:13px; margin-top:16px; line-height:1.7}
+#inspector .btnrow{display:flex; gap:6px; margin-top:14px}
+#insp-result{margin-top:14px}
+#insp-result pre{background:#101627; border:1px solid var(--line); border-radius:6px;
+  padding:8px; font-size:12px; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-all}
+
+/* ---------- Log panel ---------- */
+#logpanel{
+  height:148px; background:var(--panel); border-top:1px solid var(--line);
+  display:flex; flex-direction:column; flex-shrink:0;
+}
+#logpanel.collapsed{height:30px}
+#loghead{display:flex; align-items:center; padding:4px 12px; font-size:12px; color:var(--dim);
+  cursor:pointer; user-select:none; gap:8px; flex-shrink:0}
+#logbody{flex:1; overflow-y:auto; padding:2px 12px 8px; font-family:ui-monospace,Consolas,monospace; font-size:12px; line-height:1.6}
+#logbody .t{color:var(--faint); margin-right:8px}
+#logbody .ok{color:var(--green)} #logbody .er{color:var(--red)}
+#logbody .nm{color:var(--accent)} #logbody .wr{color:var(--amber)}
+
+/* ---------- Modal ---------- */
+.modal-mask{position:fixed; inset:0; background:rgba(5,8,15,.6); display:none;
+  align-items:center; justify-content:center; z-index:300} /* 高於總覽頁(200)，兩邊都要能開對話框 */
+.modal-mask.show{display:flex}
+.modal{background:var(--panel); border:1px solid var(--line); border-radius:12px;
+  width:430px; max-width:92vw; padding:20px; box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.modal h2{font-size:15px; margin-bottom:4px}
+.modal .sub{font-size:12px; color:var(--dim); line-height:1.6}
+.modal .btnrow{display:flex; justify-content:flex-end; gap:8px; margin-top:18px}
+
+/* menu dropdown */
+.menu{position:absolute; background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+  padding:5px; z-index:90; box-shadow:0 10px 30px rgba(0,0,0,.5); display:none; min-width:210px}
+.menu.show{display:block}
+.menu button{display:flex; width:100%; border:none; background:none; text-align:left; padding:7px 10px; border-radius:6px}
+.menu button:hover{background:var(--panel)}
+.filerow{display:flex; gap:6px; align-items:stretch}
+.filerow input{flex:1; min-width:0}
+.filerow button{flex-shrink:0; padding:5px 9px}
+kbd{background:#0d1220;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px;font-family:inherit}
+
+/* ---------- FlowMap 總覽（Project 分組＋左側 outline） ---------- */
+#overview{position:fixed; inset:0; z-index:200; background:var(--bg); display:none; flex-direction:column}
+#overview.show{display:flex}
+#ov-head{display:flex; align-items:center; gap:10px; padding:10px 18px;
+  background:var(--panel); border-bottom:1px solid var(--line)}
+#ov-head .brand{font-weight:700; font-size:15px; letter-spacing:.3px}
+#ov-head .brand b{color:var(--accent)}
+#ov-head .ov-title{font-size:13px; color:var(--dim)}
+#ov-body{flex:1; display:flex; min-height:0}
+/* 左側 outline：點一下捲動到該 Project 區塊 */
+#ov-outline{width:200px; flex-shrink:0; border-right:1px solid var(--line); background:var(--panel);
+  overflow-y:auto; padding:14px 10px}
+#ov-outline h4{font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:1px; margin:2px 0 8px 4px}
+.ov-oitem{display:flex; align-items:center; gap:6px; padding:7px 10px; border-radius:6px; font-size:13px;
+  cursor:pointer; color:var(--dim); user-select:none; white-space:nowrap; overflow:hidden}
+.ov-oitem:hover{background:var(--panel2); color:var(--text)}
+.ov-oitem .cnt{margin-left:auto; font-size:11px; color:var(--faint)}
+/* 右側主區：依 Project 分組的區塊 */
+#ov-main{flex:1; overflow-y:auto; padding:20px 28px}
+.pj-section{max-width:1100px; margin:0 auto 34px; scroll-margin-top:8px}
+.pj-head{display:flex; align-items:center; gap:10px; padding:6px 2px 10px;
+  border-bottom:1px solid var(--line); margin-bottom:14px}
+.pj-head h2{font-size:15px}
+.pj-head .pj-count{font-size:12px; color:var(--faint)}
+.pj-head button{font-size:12px; padding:3px 9px}
+.pj-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px}
+.pj-emptyhint{grid-column:1/-1; color:var(--faint); font-size:13px; padding:6px 2px}
+.fm-card{background:var(--panel2); border:1px solid var(--line); border-radius:var(--radius);
+  padding:14px; cursor:pointer; display:flex; flex-direction:column; gap:12px; min-height:96px}
+.fm-card:hover{border-color:var(--accent)}
+.fm-card .fm-title{font-size:14px; font-weight:600; word-break:break-all; line-height:1.5}
+.fm-card .fm-acts{display:flex; gap:6px; margin-top:auto; flex-wrap:wrap}
+.fm-card .fm-acts button{font-size:12px; padding:3px 8px}
+/* 卡片拖曳：換位置／換 Project */
+.fm-card.dragging{opacity:.45}
+.fm-card.drop-before{box-shadow:-3px 0 0 0 var(--accent)}
+.fm-card.drop-after{box-shadow:3px 0 0 0 var(--accent)}
+.pj-grid.drop-target{outline:1px dashed var(--accent); outline-offset:4px; border-radius:8px}
+/* 工具列的 FlowMap 名稱與未儲存標記 */
+#fm-name{font-size:13px; color:var(--text); max-width:220px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap}
+#fm-name .dirty{color:var(--amber); margin-left:4px}
+.fm-badge{font-size:11px; color:var(--c-subflow); border:1px solid var(--c-subflow);
+  border-radius:5px; padding:1px 6px; margin-left:8px; font-weight:400; white-space:nowrap}
+/* Local／Remote：檔案在 flowmaps/local/（不進版控）還是 flowmaps/remote/（進版控） */
+.fm-badge.scope-local{color:var(--amber); border-color:var(--amber)}
+.fm-badge.scope-remote{color:var(--green); border-color:var(--green)}
+/* 徽章本身就是切換鈕（點一下換 Local／Remote） */
+.fm-badge[data-act]{cursor:pointer}
+.fm-badge[data-act]:hover{background:rgba(255,255,255,.09); filter:brightness(1.2)}
+/* 總覽頁的短提示（搬完檔、git 標記結果），自己會淡出 */
+#ov-toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%); z-index:320;
+  background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:9px 14px;
+  font-size:12px; color:var(--text); box-shadow:0 10px 30px rgba(0,0,0,.5);
+  opacity:0; pointer-events:none; transition:opacity .18s}
+#ov-toast.show{opacity:1}
+.modal code,.pj-head code{background:#101627; border:1px solid var(--line); border-radius:4px;
+  padding:0 4px; font-family:ui-monospace,Consolas,monospace; font-size:12px}
+</style>
+</head>
+<body>
+
+<header id="topbar">
+  <span class="brand">WorkFlow<b>Graph</b></span>
+  <span class="sep"></span>
+  <button id="btn-back" title="返回 FlowMap 總覽">⌂ 總覽</button>
+  <span id="fm-name" title="目前開啟的 FlowMap"></span>
+  <button id="btn-save" title="儲存這個 FlowMap（Ctrl+S）">💾 儲存</button>
+  <span class="sep"></span>
+  <button id="btn-examples">📂 範例 ▾</button>
+  <button id="btn-layout">🧭 自動排版</button>
+  <span class="sep"></span>
+  <button id="btn-undo" title="Ctrl+Z">↺</button>
+  <button id="btn-redo" title="Ctrl+Y">↻</button>
+  <button id="btn-clear">🗑 清空</button>
+  <span class="spacer"></span>
+  <span id="claude-status" style="font-size:12px;color:var(--faint)">偵測本地 Claude…</span>
+  <span id="usage-total" title="本次執行所有 AI 節點的 token 與費用總計"></span>
+  <label class="mdl" id="lb-model" title="所有 AI 節點的預設模型。節點自己選了模型時以節點為準；「跟隨 Claude Code」＝不指定，由 CLI 決定">
+    預設模型
+    <select id="sel-model">
+      <option value="">跟隨 Claude Code</option>
+      <option value="haiku">haiku</option>
+      <option value="sonnet">sonnet</option>
+      <option value="opus">opus</option>
+    </select>
+  </label>
+  <span class="toggle on" id="tg-sim" title="模擬模式：LLM / HTTP 節點回傳假資料，不呼叫本地 Claude">
+    <input type="checkbox" id="cb-sim" checked>模擬模式
+  </span>
+  <span class="toggle" id="tg-shell" title="允許「❯ Shell 指令」節點在這台機器上執行指令。預設關閉，且不會被記住——重新整理後一律回到關閉">
+    <input type="checkbox" id="cb-shell">允許 Shell
+  </span>
+  <span class="sep"></span>
+  <button id="btn-export">⤓ 匯出</button>
+  <button id="btn-import">⤒ 匯入</button>
+  <input type="file" id="file-import" accept=".json" style="display:none">
+</header>
+
+<div id="main">
+  <aside id="palette">
+    <h3>節點庫（拖入畫布）</h3>
+    <div id="pal-list"></div>
+    <h3 id="pal-mods-head" style="display:none">FlowMap 模組</h3>
+    <div id="pal-mods"></div>
+    <div class="pal-hint">
+      拖曳節點加入畫布，或在畫布空白處<b>按右鍵</b>叫出清單<br>
+      從輸出埠 ● 拉線到輸入埠<br><br>
+      <kbd>左鍵拖曳空白</kbd> 框選節點<br>
+      <kbd>中鍵</kbd>／<kbd>Space</kbd>+左鍵 平移<br>
+      <kbd>Shift</kbd>+點擊 加選／退選<br>
+      <kbd>Del</kbd> 刪除選取<br>
+      <kbd>Ctrl+D</kbd> 複製選取<br>
+      滾輪縮放
+    </div>
+  </aside>
+
+  <div id="canvas-wrap">
+    <div id="viewport">
+      <svg id="edgesvg"></svg>
+      <div id="nodelayer"></div>
+    </div>
+    <div id="emptyhint">在畫布空白處按<b>右鍵</b>新增節點，或從左側拖入、點「範例」載入現成工作流<br>建好後按 ▶ 執行</div>
+    <div id="marquee"></div>
+    <div id="hud">100%</div>
+    <!-- 執行控制：原本在頂端工具列，改成浮在畫布右下角的小窗（拖標題列可移動，雙擊標題列回預設位置） -->
+    <div id="runpanel">
+      <div id="rp-head" title="拖曳可移動；雙擊回到右下角預設位置"><span class="rp-grip">≡</span>執行控制</div>
+      <div class="rp-body">
+        <div class="rp-row"><button class="primary" id="btn-run" title="依拓撲順序執行整張圖">▶ 執行</button></div>
+        <div class="rp-row">
+          <button id="btn-abort" disabled title="中斷當前執行">⏹ 中斷</button>
+          <button id="btn-reset" disabled title="清除上次執行的節點狀態，回到執行前的樣子">↩ 重製</button>
+        </div>
+        <div class="rp-info"><span>狀態</span><b id="rp-state">待機</b></div>
+        <div class="rp-info"><span>節點</span><b id="rp-count">0</b></div>
+      </div>
+    </div>
+  </div>
+
+  <aside id="inspector">
+    <div class="empty" id="insp-empty">點選節點以編輯參數。<br><br>這是一個 <b>Graph Engineering</b> 原型：節點＝運算單元，連線＝資料流。執行時依拓撲順序求值，條件節點會讓未選中的分支自動跳過。</div>
+    <div id="insp-form" style="display:none"></div>
+  </aside>
+</div>
+
+<div id="logpanel" class="collapsed">
+  <div id="loghead">▸ <b>執行日誌</b> <span id="logcount"></span></div>
+  <div id="logbody"></div>
+</div>
+
+<div class="menu" id="examples-menu"></div>
+<div id="ctxmenu">
+  <div id="ctx-hint"></div>
+  <input id="ctx-search" class="ctx-search" type="text" placeholder="搜尋節點…" autocomplete="off" spellcheck="false">
+  <div id="ctx-list" class="ctx-list"></div>
+</div>
+<div class="menu" id="nodemenu"></div>
+<div id="ov-toast"></div>
+
+<!-- FlowMap 總覽（覆蓋整個編輯器，開啟時為預設畫面）：依 Project 分組，左側 outline 快捷跳段 -->
+<div id="overview">
+  <header id="ov-head">
+    <span class="brand">WorkFlow<b>Graph</b></span>
+    <span class="ov-title">FlowMap 總覽</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="primary" id="btn-pj-new">＋ 新增 Project</button>
+  </header>
+  <div id="ov-body">
+    <nav id="ov-outline"></nav>
+    <div id="ov-main"></div>
+  </div>
+</div>
+
+<!-- 通用對話框（命名輸入 / 確認） -->
+<div class="modal-mask" id="modal-mask">
+  <div class="modal">
+    <h2 id="modal-title"></h2>
+    <div class="sub" id="modal-sub"></div>
+    <input id="modal-input" type="text" autocomplete="off" spellcheck="false" style="margin-top:12px">
+    <div class="btnrow" id="modal-btns"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* =====================================================
+   WorkFlowGraph — 節點式工作流編輯器 / 執行引擎（單檔原型）
+   架構：NodeTypes 註冊表 → graph 狀態 → 畫布渲染 → 執行引擎
+   ===================================================== */
+
+/* 伺服器服務這個頁面時把本次啟動的權杖填進來（見 server.js 的 guardApi）。
+   /api/shell 需要它——自訂標頭必定觸發 preflight，跨源頁面送不出來。 */
+const API_TOKEN = '__WFG_API_TOKEN__';
+const $ = s => document.querySelector(s);
+const uid = () => 'n' + Math.random().toString(36).slice(2, 9);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+/* 這次開頁已經核准過的 shell 指令。放在圖外面：這是「使用者按過同意」的紀錄，
+   不是圖的內容，寫進 params 會被存檔、之後匯出給別人就變成預先核准。 */
+const shellApproved = new Set();
+const shellKey = (shell, cwd, cmd) => `${shell}\u0000${cwd}\u0000${cmd}`;
+const clip = (s, n=120) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n) + '…' : s; };
+
+/* LLM 節點「輸出限制」：每種限制＝一段固定守則（注入 system）＋一個強制後處理 */
+const LLM_CONSTRAINTS = {
+  '僅回答內容': {
+    directive: '你是純文字產生器，沒有任何工具、檔案存取或執行能力。只輸出需求所要求的內容本體：不要開場白、說明、結語，不要提及權限、檔案建立、或你能不能做某件事，也不要把整份輸出包在 markdown 圍欄裡。若需求用了「創建／建立／寫入某檔案」等字眼，一律理解為「輸出該檔案應有的內容」。',
+    /* 硬保險：模型把「整份輸出」包在一個 ``` 圍欄裡時剝掉（會毀掉 md 檔——
+       frontmatter 不在第一行、下游切檔對不到標記）。只剝「整段就是一個圍欄」的情況，
+       內容中間夾雜的圍欄不動。 */
+    post: (t, log) => {
+      /* 只認「第一個非空行是開圍欄、最後一個非空行是收圍欄，且中間沒有任何行首圍欄」。
+         單純用 /^```...```$/ 錨定頭尾會誤傷「開頭是程式碼區塊、結尾也是程式碼區塊」的
+         正常文件——那會把首尾標記吃掉、中間圍欄變孤兒，比不剝更糟。判不準時寧可不剝。 */
+      const s = String(t);
+      const lines = s.split(/\r?\n/);
+      let a = 0, b = lines.length - 1;
+      while (a <= b && lines[a].trim() === '') a++;
+      while (b >= a && lines[b].trim() === '') b--;
+      if (b > a && /^```[\w+-]*[ \t]*$/.test(lines[a]) && /^```[ \t]*$/.test(lines[b])
+          && !lines.slice(a + 1, b).some(l => /^```/.test(l))) {
+        log('輸出限制：整份輸出被包在 ``` 圍欄裡，已剝除');
+        return lines.slice(a + 1, b).join('\n');
+      }
+      return s;
+    },
+  },
+  '僅程式碼': {
+    directive: '你是程式碼產生器，沒有任何工具、檔案存取或執行能力。只輸出程式碼本體：不要任何說明文字、開場白、結語，不要 markdown 圍欄，不要提及權限或檔案。若需求說「創建某檔案」，理解為「輸出該檔案的完整程式碼」。',
+    post: (t, log) => {
+      const blocks = [...t.matchAll(/```[\w+#.-]*[^\S\n]*\r?\n([\s\S]*?)(?:\r?\n)?```/g)].map(m => m[1]);
+      if (blocks.length) { log('輸出限制：偵測到說明文字，已強制只保留程式碼區塊'); return blocks.join('\n\n'); }
+      return t;
+    },
+  },
+  '僅 JSON': {
+    directive: '你是 JSON 產生器，沒有任何工具或檔案存取能力。只輸出一個合法的 JSON，不要任何說明文字、不要 markdown 圍欄。',
+    post: (t, log) => {
+      const fence = t.match(/```(?:json)?[^\S\n]*\r?\n([\s\S]*?)(?:\r?\n)?```/);
+      let cand = fence ? fence[1] : t;
+      const a = cand.search(/[\[{]/);
+      const b = Math.max(cand.lastIndexOf('}'), cand.lastIndexOf(']'));
+      if (a >= 0 && b > a) cand = cand.slice(a, b + 1);
+      try { JSON.parse(cand); if (cand !== t) log('輸出限制：已強制只保留 JSON 本體'); return cand; }
+      catch { log('輸出限制：回覆不是合法 JSON，原樣輸出'); return t; }
+    },
+  },
+};
+
+/* 這一次呼叫要用哪個模型：節點自己選的優先，其次是工具列的「預設模型」，
+   兩者都沒有就回 undefined＝不指定，交給 Claude Code 自己決定。
+   （模型是最大的成本變數：只回一個詞的分類節點用 haiku 與用 opus 差了兩個量級） */
+function resolveModel(ctx) {
+  const own = ctx?.params?.model;
+  if (own && own !== '預設') return own;
+  return (ctx?.settings?.model || state.settings.model) || undefined;
+}
+/* 節點卡片上顯示的模型：沒指定時把目前的全域預設一起寫出來，不讓人猜 */
+const modelLabel = n => (n.params.model && n.params.model !== '預設')
+  ? n.params.model
+  : (state.settings.model ? `預設→${state.settings.model}` : '預設');
+
+/* ---------- 會話群組（session 是顯式資源，不是隱式狀態） ----------
+   AI 節點可填「會話名」：同一次執行中，同名節點依序共用同一個 Claude 會話——
+   後面的呼叫 resume 前面的 session，先前讀入的程式碼與材料以快取計價重用。
+   規則（機制保證，全部有 log，不允許無聲行為）：
+   - 會話表是「這一次執行」的執行期狀態（runGraph 建立、跑完即棄），不序列化、不跨執行。
+   - 會話綁定一個 bindKey（程式碼查詢＝根目錄路徑；純 LLM＝空字串）：
+     同名但綁定不同根目錄 → 不共用，開新會話並警告（resume 換 cwd 會找不到會話）。
+   - 留空＝每次獨立呼叫。需要隔離的節點（驗證、拷問、只看 skill 作答）應該留空。 */
+function aiSession(ctx, bindKey) {
+  const name = String(ctx.params.session || '').trim();
+  if (!name) return { name: '' };
+  if (!ctx.sessions) {
+    ctx.log(`⚠ 會話「${name}」：目前執行環境沒有會話表，改用獨立呼叫`);
+    return { name: '' };
+  }
+  const rec = ctx.sessions[name];
+  if (!rec) { ctx.log(`會話「${name}」：本次執行首次使用，開新會話`); return { name, bindKey: bindKey || '' }; }
+  if ((rec.bindKey || '') !== (bindKey || '')) {
+    ctx.log(`⚠ 會話「${name}」先前綁定的是另一個根目錄（${rec.bindKey || '（無）'}）——此節點改開新會話，不共用`);
+    return { name, bindKey: bindKey || '' };
+  }
+  ctx.log(`會話「${name}」：延續先前會話（已讀入的內容以快取計價重用）`);
+  return { name, bindKey: bindKey || '', resume: rec.sessionId };
+}
+function aiSessionDone(ctx, sess, data) {
+  if (!sess?.name || !ctx.sessions) return;
+  if (data.sessionId) ctx.sessions[sess.name] = { sessionId: data.sessionId, bindKey: sess.bindKey || '' };
+  else ctx.log(`⚠ 會話「${sess.name}」：伺服器沒有回傳 session id（Claude Code 版本過舊？）——下一顆同名節點會開新會話`);
+}
+
+/* AI 端點共用呼叫：帶會話 resume 與逾時參數，並讀取 NDJSON 進度串流
+   （伺服器每 15 秒回報一行「工具呼叫 N 次｜已產生 X 字」）。
+   舊版伺服器回單包 JSON 也相容（依 Content-Type 判斷）。 */
+async function aiFetch(url, payload, ctx) {
+  const t = Number(ctx.params.timeout);
+  if (Number.isFinite(t) && t > 0) payload.timeoutMs = Math.round(t * 1000);
+  payload.stream = true;
+  const res = await fetch(url, {
+    signal: ctx.signal,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  let data = null;
+  if ((res.headers.get('content-type') || '').includes('ndjson')) {
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    const eat = line => {
+      if (!line.trim()) return;
+      let obj; try { obj = JSON.parse(line); } catch { return; }
+      if (obj.final) data = obj;
+      else if (obj.progress) ctx.log(obj.progress);
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) { eat(buf.slice(0, i)); buf = buf.slice(i + 1); }
+    }
+    eat(buf);
+    if (!data) throw new Error('伺服器串流中斷（沒有收到最終結果）');
+  } else {
+    data = await res.json().catch(() => ({}));
+  }
+  if (!res.ok || data.error) throw new Error(data.error || ('伺服器錯誤 ' + res.status));
+  if (data.costUsd !== undefined) ctx.log(`（${((data.durationMs || 0) / 1000).toFixed(1)}s，$${data.costUsd.toFixed(4)}）`);
+  ctx.meter?.({ ...(data.usage || {}), costUsd: data.costUsd, durationMs: data.durationMs });
+  return data;
+}
+/* 卡片摘要用：有會話名就標出來 */
+const sessionLabel = n => n.params.session ? '🔗 會話：' + n.params.session + '\n' : '';
+
+/* ---------- 最近使用的路徑 ----------
+   使用者偏好，不是圖的內容——存 localStorage（同「預設模型」的理由：放進圖會害
+   存檔被判定成有變更）。file / folder 各一份，最多 8 筆、最新在前。
+   記錄時機：📂 瀏覽選定時、每次執行時掃描所有有值的 file/folder 參數
+   （手打或匯入的路徑也會被記到）。localStorage 寫不進去（隱私模式等）就靜默略過，
+   功能照常、只是不記憶。 */
+const RECENT_PATH_KEY = kind => 'wfg-recent-' + kind;   // kind: 'file' | 'folder'
+function recentPaths(kind) {
+  try {
+    const a = JSON.parse(localStorage.getItem(RECENT_PATH_KEY(kind)) || '[]');
+    return Array.isArray(a) ? a.filter(x => typeof x === 'string') : [];
+  } catch { return []; }
+}
+function recordRecentPath(kind, p) {
+  p = String(p || '').trim();
+  if (!p) return;
+  try {
+    const a = [p, ...recentPaths(kind).filter(x => x !== p)].slice(0, 8);
+    localStorage.setItem(RECENT_PATH_KEY(kind), JSON.stringify(a));
+  } catch {}
+}
+/* 執行前把圖上所有有值的 file/folder 參數記進最近清單 */
+function recordRecentPathsFromGraph() {
+  for (const n of state.nodes) {
+    for (const p of (typeOf(n)?.params || [])) {
+      if (p.kind === 'file' || p.kind === 'folder') recordRecentPath(p.kind, n.params[p.key]);
+    }
+  }
+}
+
+/* ---------- 節點型別註冊表 ---------- */
+const NodeTypes = {
+  input: {
+    title: '輸入', color: 'var(--c-input)', icon: '⌨',
+    inputs: [], outputs: [{ name: 'out', label: '文字' }],
+    params: [{ key: 'value', label: '輸入內容', kind: 'textarea', def: '' }],
+    summary: n => clip(n.params.value || '（空白）', 60),
+    async run(ctx) { return { out: ctx.params.value ?? '' }; }
+  },
+  filein: {
+    title: '外部檔案連結', color: 'var(--c-filein)', icon: '📄',
+    inputs: [{ name: 'path', label: '路徑(選填)' }],
+    outputs: [{ name: 'out', label: '檔案內容' }],
+    params: [
+      { key: 'path', label: '檔案路徑（md / txt / docx / xlsx / csv / html / json）', kind: 'file', def: '' },
+    ],
+    summary: n => n.params.path ? clip(n.params.path, 56) : '（尚未指定檔案路徑）',
+    async run(ctx) {
+      const p = String(ctx.inputs.path ?? ctx.params.path ?? '').trim();
+      if (!p) throw new Error('未指定檔案路徑（在右側檢查器填入，或接線到 path 埠）');
+      const res = await fetch('/api/readfile', {
+        signal: ctx.signal,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: p }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || ('伺服器錯誤 ' + res.status));
+      ctx.log('已讀取 ' + data.name + '（' + data.text.length + ' 字元' + (data.truncated ? '，超長已截斷' : '') + '）');
+      return { out: data.text };
+    }
+  },
+  folderlink: {
+    title: '資料夾連結', color: 'var(--c-folderlink)', icon: '📁',
+    inputs: [], outputs: [{ name: 'out', label: '資料夾路徑' }],
+    params: [
+      { key: 'path', label: '資料夾路徑（輸出的是路徑字串本身，給程式碼查詢的 folder 埠、HTTP 等節點當參考值；不讀取資料夾內容）', kind: 'folder', def: '' },
+    ],
+    summary: n => n.params.path ? '路徑：' + clip(n.params.path, 52) : '（尚未指定資料夾）',
+    /* 與「外部檔案連結」的分工：檔案連結輸出的是內容，這顆輸出的是路徑本身。
+       職責只有一個：用系統原生視窗選一個資料夾、把路徑當值傳下去。 */
+    async run(ctx) {
+      const p = String(ctx.params.path || '').trim();
+      if (!p) throw new Error('未指定資料夾（在右側檢查器用「📂 瀏覽」選擇）');
+      return { out: p };
+    }
+  },
+  template: {
+    title: 'Prompt 模板', color: 'var(--c-template)', icon: '✍',
+    inputs: [{ name: 'in', label: '輸入（可接多條）', multi: true, requireAll: true }],
+    outputs: [{ name: 'out', label: '文字' }],
+    params: [{ key: 'template', label: '模板（用 @節點名稱 引用上游輸入，見下方已連接清單）', kind: 'textarea', def: '' }],
+    summary: n => clip(n.params.template || '（空白模板）', 60),
+    async run(ctx) {
+      let t = ctx.params.template ?? '';
+      // @節點名稱 引用：長名稱優先替換，避免短名稱吃掉長名稱的一部分
+      const srcs = (ctx.sources?.in || []).slice().sort((x, y) => y.label.length - x.label.length);
+      for (const s of srcs) t = t.replaceAll('@' + s.label, String(s.value ?? ''));
+      // 向下相容舊寫法 {{a}} {{b}} {{c}}：依連線順序對應
+      const vals = ctx.inputs.in || [];
+      ['a', 'b', 'c'].forEach((k, i) =>
+        t = t.replaceAll('{{' + k + '}}', vals[i] !== undefined ? String(vals[i]) : ''));
+      return { out: t };
+    }
+  },
+  llm: {
+    title: 'LLM 呼叫', color: 'var(--c-llm)', icon: '🧠',
+    inputs: [{ name: 'prompt', label: '提示' }],
+    outputs: [{ name: 'out', label: '回覆' }],
+    params: [
+      { key: 'system', label: 'System 提示', kind: 'textarea', def: '' },
+      { key: 'constraint', label: '輸出限制（只回答需求，不做其他操作）', kind: 'select', options: ['無', '僅回答內容', '僅程式碼', '僅 JSON'], def: '無' },
+      { key: 'model', label: '模型', kind: 'select', options: ['預設', 'haiku', 'sonnet', 'opus'], def: '預設' },
+      { key: 'session', label: '會話名（選填）：同名 AI 節點在同一次執行中依序共用一個 Claude 會話，前面的材料以快取重用省 token；留空＝獨立呼叫。需要隔離的節點（驗證、拷問）請留空', kind: 'text', def: '' },
+      { key: 'timeout', label: '逾時上限（秒；0＝用預設 900s。卡死另由活動偵測判定——只要持續有輸出就不會被砍，大工作量不會誤殺）', kind: 'number', def: 0, min: 0, step: 30 },
+    ],
+    summary: n => (n.params.constraint && n.params.constraint !== '無' ? '🔒 ' + n.params.constraint + '\n' : '') + sessionLabel(n) + (n.params.system ? 'sys: ' + clip(n.params.system, 40) + '\n' : '') + '本地 Claude（' + modelLabel(n) + '）',
+    async run(ctx) {
+      const prompt = String(ctx.inputs.prompt ?? '');
+      if (state.simulate) {
+        await sleep(500 + Math.random() * 700);
+        let sim = simulateLLM(ctx.params.system, prompt);
+        const c = LLM_CONSTRAINTS[ctx.params.constraint];
+        if (c) sim = c.post(sim, ctx.log);
+        return { out: sim };
+      }
+      // 呼叫本地伺服器 → claude -p（走本機登入的 Claude Code，免 API 金鑰）
+      const cons = LLM_CONSTRAINTS[ctx.params.constraint];
+      const system = cons
+        ? cons.directive + (ctx.params.system ? '\n\n' + ctx.params.system : '')
+        : (ctx.params.system || undefined);
+      const sess = aiSession(ctx, '');   // 純 LLM 會話不綁根目錄
+      const payload = { system, prompt, model: resolveModel(ctx) };
+      if (sess.resume) payload.resume = sess.resume;
+      const data = await aiFetch('/api/llm', payload, ctx);
+      aiSessionDone(ctx, sess, data);
+      let text = data.text;
+      if (cons) text = cons.post(text, ctx.log);   // 強制後處理：就算模型多話，也只留內容本體
+      return { out: text };
+    }
+  },
+  code: {
+    title: '程式碼', color: 'var(--c-code)', icon: '𝑓',
+    inputs: [{ name: 'a', label: 'a' }, { name: 'b', label: 'b' }, { name: 'c', label: 'c' }],
+    outputs: [{ name: 'out', label: '結果' }],
+    params: [{ key: 'code', label: 'JavaScript（變數 a、b、c 可用，需 return）', kind: 'textarea', def: 'return a;' }],
+    summary: n => clip(n.params.code, 60),
+    async run(ctx) {
+      const fn = new Function('a', 'b', 'c', 'inputs', ctx.params.code || 'return a;');
+      const r = await fn(ctx.inputs.a, ctx.inputs.b, ctx.inputs.c, ctx.inputs);
+      return { out: r };
+    }
+  },
+  shell: {
+    title: 'Shell 指令', color: 'var(--c-shell)', icon: '❯',
+    inputs: [{ name: 'stdin', label: '標準輸入（選填）' }],
+    outputs: [
+      { name: 'ok', label: '成功 → stdout' },
+      { name: 'fail', label: '失敗 → stderr' },
+    ],
+    params: [
+      { key: 'cmd', label: '指令（整段交給 shell）。上游的值請從 stdin 讀，或用環境變數 $WFG_IN／%WFG_IN%——不要用字串拼接組指令', kind: 'textarea', def: '' },
+      { key: 'cwd', label: '工作目錄（留空＝伺服器所在目錄）', kind: 'folder', def: '' },
+      { key: 'shell', label: 'Shell（系統預設：Windows→cmd、其他→sh）', kind: 'select', options: ['系統預設', 'bash', 'sh', 'powershell', 'cmd'], def: '系統預設' },
+      { key: 'timeout', label: '逾時（秒；0＝預設 60s。逾時會殺掉整棵行程樹）', kind: 'number', def: 0, min: 0, step: 10 },
+    ],
+    summary: n => {
+      const first = String(n.params.cmd || '').split('\n').find(l => l.trim()) || '（未填指令）';
+      return (state.allowShell ? '' : '⚠ 工具列「允許 Shell」未開啟\n')
+        + (n.params.shell || '系統預設') + (n.params.cwd ? ' @ ' + clip(n.params.cwd, 28) : '')
+        + '\n$ ' + clip(first, 46);
+    },
+    /* 這是全 app 風險最高的節點：在使用者的機器上執行任意指令，而圖是可匯入、可分享的內容。
+       能力邊界一律用機制保證（NODE_PRINCIPLES 一之 2），共三道，缺一不可：
+         ① 模擬模式下**根本不呼叫後端**，回假輸出
+         ② 工具列「允許 Shell」總開關，預設關、不持久化（匯入別人的圖不可能默默執行）
+         ③ 每一段「新的指令內容」第一次執行時彈確認；指令／shell／工作目錄任一改變就再問一次
+       指令**只能是節點參數**，沒有 command 輸入埠：上游的值走 stdin 與 WFG_IN 環境變數，
+       不做字串插值——命令列的形狀完全由圖的作者決定，上游資料再怪也只是資料。
+       輸出比照條件分支：成功走 ok、非 0 結束碼走 fail，另一邊的下游傳染式跳過。
+       「跑不起來」（閘門關著／使用者取消／逾時／找不到 shell）是**節點錯誤**，不是 fail 分支。 */
+    async run(ctx) {
+      const cmd = String(ctx.params.cmd ?? '').trim();
+      if (!cmd) throw new Error('沒有指令內容（在右側檢查器的「指令」欄填入）');
+      const shell = ctx.params.shell || '系統預設';
+      const cwd = String(ctx.params.cwd ?? '').trim();
+      const secs = Math.max(0, Number(ctx.params.timeout) || 0);
+      const timeoutMs = secs > 0 ? Math.round(secs * 1000) : 60000;
+      const hasStdin = Object.prototype.hasOwnProperty.call(ctx.inputs, 'stdin');
+      const stdin = hasStdin ? String(ctx.inputs.stdin ?? '') : '';
+
+      if (state.simulate) {
+        await sleep(300);
+        ctx.log('模擬模式：不執行任何指令（切到真實模式並打開工具列的「允許 Shell」才會真的跑）');
+        return { ok: '【模擬模式】不會實際執行：\n' + clip(cmd, 200) };
+      }
+      if (!state.allowShell)
+        throw new Error('Shell 指令被擋下：工具列的「允許 Shell」是關閉的。' +
+          '請先確認這段指令的內容，再打開那個開關（重新整理後會自動關回去）');
+
+      const key = shellKey(shell, cwd, cmd);
+      if (!shellApproved.has(key)) {
+        const r = await openModal({
+          title: '要在這台機器上執行指令嗎？',
+          sub: `節點「${esc(ctx.params._label || 'Shell 指令')}」要用 <b>${esc(shell)}</b> 執行：` +
+               `<pre style="white-space:pre-wrap;word-break:break-all;margin:8px 0;max-height:180px;overflow:auto">${esc(cmd)}</pre>` +
+               `工作目錄：${esc(cwd || '（伺服器所在目錄）')}<br>` +
+               `核准後，同一段指令在這次開頁期間不會再問；指令內容改過就會重新詢問。`,
+          buttons: [{ label: '取消', value: 'cancel' }, { label: '執行', value: 'ok', primary: true }],
+        });
+        if (!r) throw new Error('使用者取消了這段指令的執行');
+        shellApproved.add(key);
+        ctx.log('已核准這段指令（內容、shell 或工作目錄改變時會再問一次）');
+      }
+      if (ctx.signal?.aborted) throw new Error('已中斷');
+
+      // 上游的值同時走 stdin 與 WFG_IN；環境變數有長度上限，太長就只走 stdin 並講出來
+      const env = {};
+      if (hasStdin) {
+        if (stdin.length <= 8192) env.WFG_IN = stdin;
+        else ctx.log(`stdin 有 ${stdin.length} 字元，超過環境變數的安全長度 → 只從 stdin 讀，WFG_IN 不設`);
+      }
+      ctx.log(`執行中…（${shell}${cwd ? ' @ ' + cwd : ''}，逾時 ${Math.round(timeoutMs / 1000)}s）`);
+      const res = await fetch('/api/shell', {
+        signal: ctx.signal,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-wfg-token': API_TOKEN },
+        body: JSON.stringify({ cmd, cwd, shell, timeoutMs, stdin: hasStdin ? stdin : undefined, env }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.error) throw new Error(d.error || ('伺服器錯誤 ' + res.status));
+
+      ctx.log(`結束碼 ${d.code}${d.signal ? '（訊號 ' + d.signal + '）' : ''}，${((d.durationMs || 0) / 1000).toFixed(1)}s`);
+      if (d.truncated?.stdout) ctx.log('⚠ stdout 超過 8MB，已截斷');
+      if (d.truncated?.stderr) ctx.log('⚠ stderr 超過 8MB，已截斷');
+      if (d.stderr) ctx.log('stderr：' + clip(d.stderr, 300));
+      if (d.code === 0) {
+        if (!d.stdout) ctx.log('指令成功但沒有任何 stdout 輸出（ok 埠會送出空字串）');
+        return { ok: d.stdout };
+      }
+      ctx.log(`指令失敗 → 走 fail 分支（ok 分支的下游整條不執行）`);
+      return { fail: d.stderr || d.stdout || ('指令以結束碼 ' + d.code + ' 結束，沒有任何輸出') };
+    }
+  },
+  http: {
+    title: 'HTTP 請求', color: 'var(--c-http)', icon: '🌐',
+    inputs: [{ name: 'body', label: '內容' }],
+    outputs: [{ name: 'out', label: '回應' }],
+    params: [
+      { key: 'method', label: '方法', kind: 'select', options: ['GET', 'POST', 'PUT', 'DELETE'], def: 'GET' },
+      { key: 'url', label: 'URL', kind: 'text', def: '' },
+    ],
+    summary: n => n.params.method + ' ' + clip(n.params.url || '（未設定 URL）', 44),
+    async run(ctx) {
+      if (state.simulate) { await sleep(400); return { out: JSON.stringify({ simulated: true, url: ctx.params.url, echo: ctx.inputs.body ?? null }, null, 2) }; }
+      if (!ctx.params.url) throw new Error('未設定 URL');
+      const opt = { method: ctx.params.method };
+      if (ctx.params.method !== 'GET' && ctx.inputs.body !== undefined) {
+        opt.headers = { 'Content-Type': 'application/json' };
+        opt.body = typeof ctx.inputs.body === 'string' ? ctx.inputs.body : JSON.stringify(ctx.inputs.body);
+      }
+      opt.signal = ctx.signal;
+      const res = await fetch(ctx.params.url, opt);
+      const text = await res.text();
+      try { return { out: JSON.parse(text) }; } catch { return { out: text }; }
+    }
+  },
+  websearch: {
+    title: '網路查詢', color: 'var(--c-web)', icon: '🔍',
+    inputs: [{ name: 'query', label: '查詢' }],
+    outputs: [{ name: 'out', label: '結果' }],
+    params: [
+      { key: 'instructions', label: '整理指示（選填）', kind: 'textarea', def: '回傳 3～5 個重點發現，每點附上來源網址。' },
+      { key: 'model', label: '模型（搜尋通常是全圖最貴也最慢的一顆，換小模型省最多）', kind: 'select', options: ['預設', 'haiku', 'sonnet', 'opus'], def: '預設' },
+      { key: 'timeout', label: '逾時上限（秒；0＝用預設 900s。卡死另由活動偵測判定）', kind: 'number', def: 0, min: 0, step: 30 },
+    ],
+    summary: n => '本地 Claude 上網搜尋（' + modelLabel(n) + '）\n' + clip(n.params.instructions, 40),
+    async run(ctx) {
+      const q = String(ctx.inputs.query ?? '').trim();
+      if (!q) throw new Error('沒有查詢內容（把上游接到 query 埠）');
+      if (state.simulate) {
+        await sleep(700);
+        return { out: '【模擬搜尋結果】關於「' + clip(q, 40) + '」：\n1. 模擬要點一（https://example.com/a）\n2. 模擬要點二（https://example.com/b）\n3. 模擬要點三（https://example.com/c）\n切換真實模式後會透過本地 Claude 實際上網搜尋。' };
+      }
+      ctx.log('搜尋中…真實網路查詢通常需要 30 秒～2 分鐘');
+      const data = await aiFetch('/api/websearch', {
+        query: q,
+        instructions: ctx.params.instructions || undefined,
+        model: resolveModel(ctx),
+      }, ctx);
+      return { out: data.text };
+    }
+  },
+  codequery: {
+    title: '程式碼查詢', color: 'var(--c-codequery)', icon: '🔬',
+    inputs: [
+      { name: 'prompt', label: '查詢指示（要問這個專案什麼）' },
+      { name: 'folder', label: '專案根目錄(選填，優先於參數)' },
+    ],
+    outputs: [{ name: 'out', label: '回答（附 檔案:行號 引用）' }],
+    params: [
+      { key: 'folder', label: '查詢起點資料夾（主要查詢範圍與引用基準；同一 repo 內的其他檔案也可唯讀查閱，repo 之外的引用一律判無效；folder 埠接線時以接線為準）', kind: 'folder', def: '' },
+      { key: 'model', label: '模型', kind: 'select', options: ['預設', 'haiku', 'sonnet', 'opus'], def: '預設' },
+      { key: 'session', label: '會話名（選填）：同名 AI 節點在同一次執行中依序共用一個 Claude 會話——前面讀過的程式碼以快取重用，省最多。會話綁定根目錄，同名不同根目錄不共用。需要獨立驗證的節點請留空', kind: 'text', def: '' },
+      { key: 'timeout', label: '逾時上限（秒；0＝用預設 1800s。卡死另由活動偵測判定——持續有輸出就不會被砍，掃大專案不會誤殺）', kind: 'number', def: 0, min: 0, step: 30 },
+    ],
+    summary: n => (n.params.folder
+      ? '唯讀查詢 ' + clip(n.params.folder, 44)
+      : '唯讀查詢（根目錄：接線 folder 埠或填參數）') + '\n' + sessionLabel(n) + '本地 Claude（' + modelLabel(n) + '）',
+    /* 唯讀程式碼分析：模型只有 Read / Grep / Glob（後端整組拔掉其餘工具）。
+       範圍語意（2026-08-26「正名 repo root」）：指定資料夾是「查詢起點」＝主要範圍與
+       引用基準；同一 repo 內的其他檔案也可唯讀查閱（盤點模組消費者需要它）。
+       回答的 檔案:行號 引用由後端雙基準逐筆驗證（起點相對→repo 根相對），repo 之外一律無效。
+       起點同 filein 的 path 慣例：可接線（folder 埠）也可填參數，接線優先。 */
+    async run(ctx) {
+      const q = String(ctx.inputs.prompt ?? '').trim();
+      if (!q) throw new Error('沒有查詢指示（把上游接到 prompt 埠）');
+      const folder = String(ctx.inputs.folder ?? ctx.params.folder ?? '').trim();
+      if (!folder) throw new Error('未指定專案根目錄（接線到 folder 埠，或在右側檢查器用「📂 瀏覽」選擇資料夾）');
+      if (state.simulate) {
+        await sleep(700);
+        return { out: '【模擬程式碼查詢】關於「' + clip(q, 40) + '」：\n- 模擬陳述一（src/example.ts:42）\n- 模擬陳述二（src/example.ts:99）\n切換真實模式後，本地 Claude 會以唯讀工具實際讀取 ' + clip(folder, 40) + ' 並附可驗證的 檔案:行號 引用。' };
+      }
+      ctx.log('唯讀查詢中…掃描程式碼通常需要 30 秒～數分鐘');
+      const sess = aiSession(ctx, folder);   // 讀碼會話綁定根目錄
+      const payload = { prompt: q, folder, model: resolveModel(ctx) };
+      if (sess.resume) payload.resume = sess.resume;
+      const data = await aiFetch('/api/codequery', payload, ctx);
+      aiSessionDone(ctx, sess, data);
+      // 引用驗證結果：有問題一定講出來（不允許無聲行為）
+      const c = data.citations;
+      if (c) {
+        if (!c.checked) ctx.log('⚠ 回答中沒有偵測到任何 檔案:行號 引用——內容未經對碼驗證，請自行斟酌');
+        else if (c.invalid.length) {
+          for (const bad of c.invalid) ctx.log(`⚠ 無效引用 ${bad.ref}：${bad.reason}`);
+          ctx.log(`引用驗證：${c.checked} 筆中有 ${c.invalid.length} 筆無效（見上）`);
+        } else ctx.log(`引用驗證：${c.checked} 筆全部有效（檔案存在且行號在範圍內）`);
+        if (c.rebased) ctx.log(`其中 ${c.rebased} 筆為查詢起點之外的檔案（以 repo 根目錄為基準驗證）`);
+      }
+      return { out: data.text };
+    }
+  },
+  condition: {
+    title: '條件分支', color: 'var(--c-condition)', icon: '⑂',
+    inputs: [{ name: 'value', label: '值' }],
+    outputs: [{ name: 'true', label: '成立 →' }, { name: 'false', label: '不成立 →' }],
+    /* 預設用 trim 後精確比對，不用 includes：上游是「只回一個詞」的分類器時，
+       includes 會在回覆變長（例如模型改成先解釋再回答）時把關鍵字撈進來而誤判成立。 */
+    params: [{ key: 'expr', label: '判斷式（變數 value 可用；建議 String(value).trim() === "…" 精確比對，少用 includes）', kind: 'text', def: 'String(value).trim() === "是"' }],
+    summary: n => 'if ' + clip(n.params.expr, 50),
+    async run(ctx) {
+      const fn = new Function('value', 'return (' + (ctx.params.expr || 'true') + ')');
+      const ok = !!fn(ctx.inputs.value);
+      ctx.log(ok ? '判斷成立 → true 分支' : '判斷不成立 → false 分支');
+      return ok ? { true: ctx.inputs.value } : { false: ctx.inputs.value };
+    }
+  },
+  merge: {
+    title: '合併', color: 'var(--c-merge)', icon: '⇥',
+    inputs: [{ name: 'in', label: '輸入（可接多條）', multi: true }],
+    outputs: [{ name: 'out', label: '結果' }],
+    params: [
+      { key: 'mode', label: '合併方式', kind: 'select', options: ['全部串接', '取第一個有值'], def: '全部串接' },
+      { key: 'sep', label: '串接分隔', kind: 'select', options: ['空一行', '換行', '空格', '直接相連'], def: '空一行' },
+      { key: 'headers', label: '串接時附上來源節點名稱', kind: 'select', options: ['否', '是'], def: '否' },
+    ],
+    summary: n => (n.params.mode || '全部串接') === '全部串接'
+      ? '等所有輸入到齊後串接成一段' : '取接線順序第一個有值的輸入',
+    async run(ctx) {
+      const srcs = ctx.sources?.in || [];
+      if (!srcs.length) throw new Error('沒有任何輸入有值');
+      if (ctx.params.mode === '取第一個有值') {
+        if (srcs.length > 1) ctx.log(`收到 ${srcs.length} 個輸入，取第一個（${srcs[0].label}），其餘忽略`);
+        return { out: srcs[0].value };
+      }
+      // 全部串接（預設）：依接線順序把所有活著的輸入接成一段
+      const sep = { '空一行': '\n\n', '換行': '\n', '空格': ' ', '直接相連': '' }[ctx.params.sep] ?? '\n\n';
+      const parts = srcs.map(s =>
+        ctx.params.headers === '是' ? '【' + s.label + '】\n' + String(s.value ?? '') : String(s.value ?? ''));
+      ctx.log(`串接 ${srcs.length} 個輸入：${srcs.map(s => s.label).join('、')}`);
+      return { out: parts.join(sep) };
+    }
+  },
+  fileout: {
+    title: '輸出檔案', color: 'var(--c-fileout)', icon: '💾',
+    inputs: [{ name: 'content', label: '內容' }, { name: 'ref', label: '參考樣板' }],
+    outputs: [{ name: 'out', label: '存檔路徑' }],
+    params: [
+      { key: 'name', label: '檔名（可含副檔名，如 icon.cs、報告.docx；留空自動命名）', kind: 'text', def: '' },
+      { key: 'type', label: '檔案類型（檔名未含副檔名時才使用；輸入副檔名會自動同步）', kind: 'select', options: ['md', 'docx', 'xlsx', 'txt', 'csv', 'html', 'json', '自訂副檔名'], def: 'md' },
+      { key: 'folder', label: '輸出資料夾（留空存到伺服器 outputs/）', kind: 'folder', def: '', ph: '（預設 outputs/）' },
+      { key: 'style', label: '格式化補充指示（選填，接了樣板時提供給 LLM）', kind: 'textarea', def: '' },
+    ],
+    summary: n => {
+      const m = String(n.params.name || '').match(/\.[A-Za-z0-9]+$/);
+      const t = m ? m[0] : (n.params.type === '自訂副檔名' ? '（待定）' : '.' + n.params.type);
+      return '輸出 ' + t + (n.params.name ? '：' + n.params.name : '') + '\n' + (n.params.folder || 'outputs/');
+    },
+    async run(ctx) {
+      let content = ctx.inputs.content;
+      if (content === undefined) throw new Error('沒有內容（把上游接到「內容」埠）');
+      content = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+      // 檔名含副檔名時以副檔名為準（同 Windows 慣例）；未含才看「檔案類型」欄位
+      const KNOWN_TYPES = ['md', 'docx', 'xlsx', 'txt', 'csv', 'html', 'json'];
+      let outName = String(ctx.params.name || '').trim();
+      let outType;
+      const extM = outName.match(/\.([A-Za-z0-9]+)$/);
+      if (extM) {
+        const ext = extM[1].toLowerCase();
+        if (KNOWN_TYPES.includes(ext)) { outType = ext; outName = outName.slice(0, -(extM[1].length + 1)); }
+        else outType = 'custom';
+      } else {
+        outType = ctx.params.type === '自訂副檔名' ? 'custom' : (ctx.params.type || 'md');
+        if (outType === 'custom')
+          ctx.log('提醒：自訂副檔名模式下，檔名請含副檔名（如 icon.cs），未含則存成 .txt');
+      }
+      const isCustom = outType === 'custom';
+      // 自訂副檔名（通常是程式碼）：LLM 輸出若整段包在 ``` 圍欄裡，自動剝掉
+      if (isCustom) {
+        const m = content.match(/^\s*```[\w+-]*\r?\n([\s\S]*?)\r?\n```\s*$/);
+        if (m) { content = m[1]; ctx.log('偵測到程式碼圍欄，已自動剝除 ``` 標記'); }
+      }
+      const ref = ctx.inputs.ref;
+      if (ref !== undefined) {
+        if (state.simulate) {
+          content = '【模擬模式：已假裝依樣板重排】\n' + content;
+          ctx.log('模擬模式：跳過 LLM 樣板重排');
+        } else {
+          ctx.log('依參考樣板重排內容中（呼叫本地 Claude）…');
+          const res = await fetch('/api/llm', {
+        signal: ctx.signal,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              system: '你是文件排版助手。使用者會提供「樣板」與「內容」。請把內容依照樣板的結構、標題層級、欄位與格式重寫。輸出目標是 ' + outType + ' 檔案：md/docx/html 可用 markdown 語法（# 標題、- 清單）；xlsx/csv 請輸出 markdown 表格或 TSV。只輸出重排後的結果，不要任何前言或說明。',
+              prompt: '【樣板】\n' + String(ref) + '\n\n【內容】\n' + content + (ctx.params.style ? '\n\n【補充指示】\n' + ctx.params.style : ''),
+              model: resolveModel(ctx),
+            }),
+          });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok || d.error) throw new Error('樣板重排失敗：' + (d.error || res.status));
+          ctx.meter?.({ ...(d.usage || {}), costUsd: d.costUsd, durationMs: d.durationMs });
+          content = d.text;
+        }
+      }
+      const res2 = await fetch('/api/writefile', {
+        signal: ctx.signal,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: outType, name: outName, folder: ctx.params.folder, content }),
+      });
+      const d2 = await res2.json().catch(() => ({}));
+      if (!res2.ok || d2.error) throw new Error(d2.error || ('伺服器錯誤 ' + res2.status));
+      ctx.log('已輸出檔案：' + d2.savedPath);
+      return { out: d2.savedPath };
+    }
+  },
+  output: {
+    title: '輸出', color: 'var(--c-output)', icon: '⏏',
+    inputs: [{ name: 'value', label: '結果' }],
+    outputs: [],
+    params: [{ key: 'name', label: '輸出名稱', kind: 'text', def: '結果' }],
+    summary: n => '顯示最終結果：' + (n.params.name || '結果'),
+    async run(ctx) {
+      ctx.log('【' + (ctx.params.name || '結果') + '】' + clip(String(ctx.inputs.value ?? ''), 400));
+      return { _display: ctx.inputs.value };
+    }
+  },
+  modin: {
+    title: '節點輸入', color: 'var(--c-modin)', icon: '📥',
+    inputs: [], outputs: [{ name: 'out', label: '值' }],
+    params: [{ key: 'value', label: '預設值（單獨執行、或模組埠沒接線時使用）', kind: 'textarea', def: '' }],
+    summary: n => '模組輸入埠　預設：' + clip(n.params.value || '（空白）', 40),
+    /* 這個 FlowMap 被當作模組執行時，本節點＝模組節點左側的輸入埠：
+       外面有接值就用外面的值，沒接就用這裡的預設值。單獨執行時一律用預設值。 */
+    async run(ctx) { return { out: ctx.params.value ?? '' }; }
+  },
+  modout: {
+    title: '節點輸出', color: 'var(--c-modout)', icon: '📤',
+    inputs: [{ name: 'value', label: '結果' }],
+    outputs: [],
+    params: [],
+    summary: n => '模組輸出埠：' + (n.params._label || '節點輸出'),
+    /* 這個 FlowMap 被當作模組執行時，本節點＝模組節點右側的輸出埠。
+       單獨執行時行為同「輸出」：把收到的值顯示出來，方便來源自己測試。 */
+    async run(ctx) {
+      const label = ctx.params._label || '節點輸出';
+      /* 沒接線就「沒有值」，不是「值是 undefined」：一定要不 emit `_display`，
+         否則模組節點會多一個永遠活著的輸出埠，下游拿到 undefined 還以為有資料通過。 */
+      if (!Object.prototype.hasOwnProperty.call(ctx.inputs, 'value')) {
+        ctx.log(`【${label}】⊘ 沒有接上任何輸入，這個輸出埠不會有值`);
+        return {};
+      }
+      ctx.log('【' + label + '】' + clip(String(ctx.inputs.value ?? ''), 400));
+      return { _display: ctx.inputs.value };
+    }
+  },
+  subflow: {
+    title: 'FlowMap 模組', color: 'var(--c-subflow)', icon: '🧩',
+    inputs: [], outputs: [],   // 動態埠：typeOf() 會由 params._ports 注入（來源的節點輸入/節點輸出）
+    params: [],                // fmId / _fmName / _ports 為內部參數，不開放檢查器編輯
+    summary: n => isModuleMissing(n)
+      ? '⚠ 來源 FlowMap 已不存在'
+      : '引用：' + (n.params._fmName || n.params.fmId || '？'),
+    async run(ctx) {
+      const fmId = ctx.params.fmId || ctx.params.wsId;   // wsId 為 Workspace 時代的舊欄位
+      if (!fmId) throw new Error('模組節點沒有指定來源 FlowMap');
+      // 循環引用與巢狀深度防護：visited 沿巢狀鏈累積（頂層由目前 FlowMap 起算）
+      const depth = ctx.depth ?? 0;
+      const visited = ctx.visited ?? new Set(currentFm ? [currentFm.id] : []);
+      if (visited.has(fmId))
+        throw new Error(`偵測到循環引用：模組「${ctx.params._fmName || fmId}」直接或間接引用了自己，無法執行`);
+      if (depth >= 8) throw new Error('模組巢狀層數超過上限（8 層）');
+      const res = await fetch('/api/flowmaps/' + encodeURIComponent(fmId), { signal: ctx.signal });
+      if (!res.ok) throw new Error('找不到來源 FlowMap（可能已被刪除）。刪掉這個模組節點，或還原來源檔案。');
+      const fm = await res.json();
+      ctx.log(`進入模組「${fm.name}」（最後儲存版本，${fm.graph.nodes.length} 個節點）`);
+      const outs = await runSubgraph(fm, ctx, new Set([...visited, fmId]), depth + 1);
+      ctx.log(`模組「${fm.name}」完成`);
+      return outs;
+    }
+  },
+  note: {
+    title: '註解', color: 'var(--c-note)', icon: '✎',
+    inputs: [], outputs: [],
+    params: [{ key: 'text', label: '註解內容', kind: 'textarea', def: '寫點說明…' }],
+    summary: n => n.params.text || '',
+    noRun: true,
+    async run() { return {}; }
+  },
+};
+
+/* 模擬 LLM：依提示產生像樣的假回覆 */
+function simulateLLM(system, prompt) {
+  const p = (system || '') + ' ' + prompt;
+  // 提示裡明確要求的分段標記行（===FILE: …===）要照樣輸出：
+  // 下游可能有依標記切檔的節點，模擬輸出不尊重格式會讓模擬測試白測。
+  const markers = [...String(prompt).matchAll(/^===FILE: .+===$/gm)].map(m => m[0]);
+  if (markers.length) return markers.map(m => m + '\n（模擬模式：此區段的模擬內容）').join('\n\n');
+  if (/分類|類別|classify/i.test(p)) return /退|款|錢/.test(prompt) ? '退款' : (/壞|故障|錯誤|當機/.test(prompt) ? '技術問題' : '一般詢問');
+  if (/翻譯|translate|english/i.test(p)) return '[EN] ' + clip(prompt.replace(/[^\x00-\xff]/g, m => m), 80) + ' — (simulated translation)';
+  if (/摘要|總結|summar/i.test(p)) return '摘要：' + clip(prompt, 60) + '（重點已濃縮，此為模擬輸出）';
+  if (/是否|嗎|吗|\?|？/.test(prompt)) return '是的，根據您的描述，答案是肯定的。（模擬回覆）';
+  return '這是模擬模式的 LLM 回覆。收到的提示開頭為：「' + clip(prompt, 70) + '」。切換到真實模式並設定 API 端點後，會呼叫實際模型。';
+}
+
+/* ---------- 全域狀態 ---------- */
+const state = {
+  nodes: [],          // {id, type, x, y, params}
+  edges: [],          // {id, from:{node,port}, to:{node,port}}
+  selection: null,    // {kind:'node'|'edge', id} — 主選取（檢查器對象）
+  selected: new Set(),// 多選中的節點 id（框選 / Shift 加選）
+  simulate: true,
+  allowShell: false,  // Shell 指令節點的總開關。刻意不持久化：每次開頁都回到關閉
+  running: false,
+  settings: { endpoint: '', apiKey: '', model: '' },
+  view: { tx: 60, ty: 40, s: 1 },
+  history: [], future: [],
+  results: {},        // nodeId -> {status, output|error}
+};
+
+const nodeById = id => state.nodes.find(n => n.id === id);
+/* subflow（FlowMap 模組）的埠是動態的：由來源 FlowMap 的輸入/輸出節點決定，
+   存於 n.params._ports（開啟 FlowMap 時與來源同步）。其餘型別回傳靜態定義。 */
+const typeOf = n => {
+  const t = NodeTypes[n.type];
+  if (n.type !== 'subflow') return t;
+  return { ...t, inputs: n.params._ports?.inputs || [], outputs: n.params._ports?.outputs || [] };
+};
+
+/* ---------- 選取模型 ----------
+   state.selection：檢查器的主對象（節點或連線，可為 null）
+   state.selected ：被選取的節點 id 集合；單選時 = {selection.id}
+   一律透過下面兩個函式改動，兩者才不會不同步。 */
+function setSelection(sel) {
+  state.selection = sel;
+  state.selected = (sel && sel.kind === 'node') ? new Set([sel.id]) : new Set();
+}
+/* ids：選取的節點集合；primaryId：指定檢查器要顯示哪一顆（省略時單選才自動帶入） */
+function setSelectedNodes(ids, primaryId) {
+  state.selected = new Set(ids);
+  const primary = (primaryId != null && state.selected.has(primaryId))
+    ? primaryId
+    : (state.selected.size === 1 ? [...state.selected][0] : null);
+  state.selection = primary != null ? { kind: 'node', id: primary } : null;
+}
+
+/* ---------- 圖的序列化出入口 ----------
+   執行時會把暫態欄位（`_flow` / `_dead`）掛在邊物件上，那是「上一次執行的畫面狀態」，
+   不是圖的內容。凡是要把圖送出去（歷史快照、FlowMap 存檔、匯出 JSON）一律走
+   graphData()，濾掉 `_` 開頭的欄位——否則跑過一次就會被誤判成未儲存的變更，
+   暫態也會被寫進存檔。讀入外部圖（存檔、匯入的 JSON）走 loadedGraph()，
+   順手洗掉舊版已經存進去的暫態。 */
+const cleanEdge = e => Object.fromEntries(Object.entries(e).filter(([k]) => !k.startsWith('_')));
+function graphData() { return { nodes: state.nodes, edges: state.edges.map(cleanEdge) }; }
+/* ---------- 本機路徑側車：存檔時的拆分 ----------
+   file / folder 類參數（kind 判定，機制而非命名慣例）的值是「這台機器」的事，
+   每個使用者不一樣——不進 FlowMap 本體（remote 檔進版控會互相蓋），改抽成
+   localPaths 隨存檔送給伺服器落在 flowmaps/local/paths/（.gitignore 內）。
+   讀取時伺服器已合併回圖，前端載入照舊。只有「儲存 FlowMap」走這裡；
+   「匯出 JSON」仍含路徑——匯出是使用者的明確動作（備份／遷移要用得到），
+   要分享給別人本來就該走版控（remote），那條路是乾淨的。 */
+/* 只有「絕對路徑」才是這台機器的事：C:\… ／ \\伺服器\… ／ /home/… ／ ~/…。
+   相對路徑（例如範例圖的 outputs/01-facts.md）是可攜的、不含任何人的機器資訊，
+   留在本體才能讓別人 clone 下來就跑得動——抽走等於把範例的設定掏空。 */
+const isAbsPath = v => /^[A-Za-z]:[\\/]/.test(v) || v.startsWith('\\\\') || v.startsWith('/') || /^~[\\/]/.test(v);
+function splitLocalPaths(graph) {
+  const localPaths = {};
+  const nodes = (graph.nodes || []).map(n => {
+    const t = typeOf(n);
+    let copy = null;
+    for (const p of t?.params || []) {
+      if (p.kind !== 'file' && p.kind !== 'folder') continue;
+      const v = String(n.params?.[p.key] ?? '').trim();
+      if (!isAbsPath(v)) continue;              // 相對路徑與空值都留在本體
+      copy ??= { ...n, params: { ...n.params } };
+      (localPaths[n.id] ??= {})[p.key] = v;
+      copy.params[p.key] = '';
+    }
+    return copy || n;   // 沒有絕對路徑的節點原樣沿用，不多做拷貝
+  });
+  return { graph: { ...graph, nodes }, localPaths };
+}
+/* 切 scope 前先把本體裡的絕對路徑洗進側車。
+   舊檔（以及這個機制上線前存的圖）路徑還在本體，總覽頁按「改成 ☁ 版控」時前端只送
+   { scope }、不送 graph，伺服器又刻意不認得節點型別抽不了——那條路上本體會原封不動
+   被搬進 remote/ 並自動 git add，等於絕對路徑直接進版控。所以由前端先做一次
+   「讀出來 → 抽路徑 → 存回去」，切換才是安全的。 */
+async function washLocalPaths(id) {
+  const fm = await fmApi('/' + id);              // GET 會把側車合併回來，拿到的是完整的圖
+  const { graph, localPaths } = splitLocalPaths(fm.graph || { nodes: [], edges: [] });
+  if (JSON.stringify(graph) === JSON.stringify(fm.graph)) return;   // 本體本來就沒有絕對路徑
+  await fmApi('/' + id, jsonOpt('PUT', { graph: { version: 1, ...graph }, localPaths }));
+}
+/* 舊版把「來源已不存在」寫進了 params._missing，讀進來要洗掉（現在放在 missingModules） */
+function cleanNode(n) {
+  if (n?.params && '_missing' in n.params) { const { _missing, ...params } = n.params; return { ...n, params }; }
+  return n;
+}
+function loadedGraph(g) {
+  const nodes = (g.nodes || []).map(cleanNode);
+  // Workspace 時代的舊欄位遷移：subflow 的 wsId → fmId、_wsName → _fmName
+  for (const n of nodes) {
+    if (n.type !== 'subflow' || !n.params) continue;
+    if (n.params.wsId && !n.params.fmId) { n.params.fmId = n.params.wsId; delete n.params.wsId; }
+    if (n.params._wsName && !n.params._fmName) { n.params._fmName = n.params._wsName; delete n.params._wsName; }
+  }
+  return { nodes, edges: (g.edges || []).map(cleanEdge) };
+}
+
+function snapshot() { return JSON.stringify(graphData()); }
+/* snap 可傳入「動作發生前」的快照，供「先試做、確定圖有變才記錄」的情境使用；
+   不要為了可能不會發生的改動先 push，因為 pushHistory 會清空 state.future（重做）。 */
+function pushHistory(snap) {
+  state.history.push(snap ?? snapshot());
+  if (state.history.length > 80) state.history.shift();
+  state.future = [];
+}
+function restore(snap) {
+  const g = JSON.parse(snap);
+  state.nodes = g.nodes; state.edges = g.edges;
+  setSelection(null); state.results = {}; updateUsageTotal(null);
+  renderAll();
+}
+function undo() { if (!state.history.length) return; state.future.push(snapshot()); restore(state.history.pop()); }
+function redo() { if (!state.future.length) return; state.history.push(snapshot()); restore(state.future.pop()); }
+
+/* ---------- 畫布渲染 ---------- */
+const vp = $('#viewport'), nodeLayer = $('#nodelayer'), edgeSvg = $('#edgesvg'), wrap = $('#canvas-wrap');
+
+function applyView() {
+  const { tx, ty, s } = state.view;
+  vp.style.transform = `translate(${tx}px,${ty}px) scale(${s})`;
+  $('#hud').textContent = Math.round(s * 100) + '%';
+}
+
+function renderAll() {
+  nodeLayer.innerHTML = '';
+  for (const n of state.nodes) nodeLayer.appendChild(buildNodeEl(n));
+  renderEdges();
+  renderInspector();
+  $('#emptyhint').style.display = state.nodes.length ? 'none' : 'flex';
+  $('#rp-count').textContent = String(state.nodes.length);
+  applyView();
+  updateFmIndicator();
+}
+
+function buildNodeEl(n) {
+  const t = typeOf(n);
+  const el = document.createElement('div');
+  el.className = 'node type-' + n.type;
+  el.dataset.id = n.id;
+  el.style.left = n.x + 'px'; el.style.top = n.y + 'px';
+  const r = state.results[n.id];
+  if (state.selected.has(n.id)) el.classList.add('selected');
+  if (r) el.classList.add(r.status);
+
+  const stTxt = r?.status === 'running'
+    ? runningText(n.id)
+    : ({ success: '完成', error: '錯誤', skipped: '已跳過' }[r?.status] || '');
+  let h = `<div class="node-head"><span class="dot" style="background:${t.color}"></span>${t.icon} ${esc(n.params._label || t.title)}<span class="st">${stTxt}</span></div>`;
+  const sum = t.summary ? t.summary(n) : '';
+  if (sum) h += `<div class="node-body">${esc(sum)}</div>`;
+  if (r?.usage) {
+    const u = r.usage;
+    h += `<div class="node-meter">↑<b>${fmtTok(u.in)}</b> ↓<b>${fmtTok(u.out)}</b> tok` +
+      (u.costUsd ? `<span class="sep">·</span><b>${fmtUsd(u.costUsd)}</b>` : '') +
+      (u.durationMs ? `<span class="sep">·</span>${(u.durationMs / 1000).toFixed(1)}s` : '') +
+      (u.calls > 1 ? `<span class="sep">·</span>${u.calls} 次呼叫` : '') +
+      `</div>`;
+  }
+  h += '<div class="node-ports">';
+  const rows = Math.max(t.inputs.length, t.outputs.length);
+  for (let i = 0; i < rows; i++) {
+    if (t.inputs[i]) {
+      const connected = state.edges.some(e => e.to.node === n.id && e.to.port === t.inputs[i].name);
+      h += `<div class="port-row in"><div class="port in ${connected ? 'connected' : ''} ${t.inputs[i].multi ? 'multi' : ''}" data-port="${t.inputs[i].name}" data-dir="in"></div>${esc(t.inputs[i].label)}</div>`;
+    }
+    if (t.outputs[i]) {
+      const connected = state.edges.some(e => e.from.node === n.id && e.from.port === t.outputs[i].name);
+      h += `<div class="port-row out">${esc(t.outputs[i].label)}<div class="port out ${connected ? 'connected' : ''}" data-port="${t.outputs[i].name}" data-dir="out"></div></div>`;
+    }
+    if (!t.inputs[i] && !t.outputs[i]) break;
+  }
+  h += '</div>';
+  if (r && r.status === 'skipped') {
+    h += r.cause === 'error'
+      ? `<div class="node-result show skip">⊘ 未執行 — 上游節點執行失敗，此節點沒有產生任何輸出值</div>`
+      : `<div class="node-result show skip">⊘ 未執行 — 上游分支未選中，此節點沒有產生任何輸出值</div>`;
+  }
+  if (r && r.status !== 'running' && r.status !== 'skipped') {
+    const val = r.status === 'error' ? r.error : displayVal(r.output);
+    if (val !== undefined && val !== '')
+      h += `<div class="node-result show ${r.status === 'error' ? 'err' : ''}">${esc(clip(val, 220))}</div>`;
+  }
+  el.innerHTML = h;
+  return el;
+}
+
+function displayVal(out) {
+  if (out === undefined) return '';
+  const v = out._display !== undefined ? out._display : (out.out !== undefined ? out.out : Object.values(out)[0]);
+  if (v === undefined) return '';
+  return typeof v === 'string' ? v : JSON.stringify(v);
+}
+
+/* 埠的世界座標 */
+function portPos(nodeId, portName, dir) {
+  const n = nodeById(nodeId); if (!n) return null;
+  const el = nodeLayer.querySelector(`.node[data-id="${nodeId}"] .port[data-port="${portName}"][data-dir="${dir}"]`);
+  if (!el) return null;
+  const nodeEl = el.closest('.node');
+  // offset 相對節點（port 為 absolute，offsetParent 是 .port-row 或 node）
+  let ox = 0, oy = 0, cur = el;
+  while (cur && cur !== nodeEl) { ox += cur.offsetLeft; oy += cur.offsetTop; cur = cur.offsetParent; }
+  return { x: n.x + ox + el.offsetWidth / 2, y: n.y + oy + el.offsetHeight / 2 };
+}
+
+function edgePath(p1, p2) {
+  const dx = Math.max(40, Math.abs(p2.x - p1.x) * 0.5);
+  return `M ${p1.x} ${p1.y} C ${p1.x + dx} ${p1.y}, ${p2.x - dx} ${p2.y}, ${p2.x} ${p2.y}`;
+}
+
+function renderEdges() {
+  edgeSvg.innerHTML = '';
+  for (const e of state.edges) {
+    const p1 = portPos(e.from.node, e.from.port, 'out');
+    const p2 = portPos(e.to.node, e.to.port, 'in');
+    if (!p1 || !p2) continue;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', edgePath(p1, p2));
+    path.classList.add('edge');
+    path.dataset.id = e.id;
+    if (state.selection?.kind === 'edge' && state.selection.id === e.id) path.classList.add('selected');
+    if (e._flow) path.classList.add('flow');
+    if (e._dead) path.classList.add('deadflow');
+    // hover 提示：這條線在上次執行時有沒有資料通過
+    if (e._flow || e._dead) {
+      const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      tip.textContent = !e._dead ? '✓ 已傳遞資料'
+        : e._deadErr ? '⊘ 未執行：上游節點執行失敗，沒有任何資料通過這條線'
+        : '⊘ 未執行：上游被跳過，沒有任何資料通過這條線';
+      path.appendChild(tip);
+    }
+    edgeSvg.appendChild(path);
+    // 未執行的線：中點畫 ⊘ 標記（貝茲曲線中點恰為兩端平均）
+    if (e._dead) {
+      const mark = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      mark.setAttribute('x', (p1.x + p2.x) / 2 - 6);
+      mark.setAttribute('y', (p1.y + p2.y) / 2 + 5);
+      mark.classList.add('edgemark');
+      mark.textContent = '⊘';
+      edgeSvg.appendChild(mark);
+    }
+  }
+}
+
+/* ---------- 座標轉換 ---------- */
+function screenToWorld(cx, cy) {
+  const r = wrap.getBoundingClientRect();
+  const { tx, ty, s } = state.view;
+  return { x: (cx - r.left - tx) / s, y: (cy - r.top - ty) / s };
+}
+
+/* ---------- 節點庫 ---------- */
+const palList = $('#pal-list');
+for (const [type, t] of Object.entries(NodeTypes)) {
+  if (type === 'subflow') continue;   // 模組節點只能從「FlowMap 模組」區建立（要有來源）
+  const d = document.createElement('div');
+  d.className = 'pal-item'; d.draggable = true; d.dataset.type = type;
+  d.innerHTML = `<span class="swatch" style="background:${t.color}"></span>${t.icon} ${t.title}`;
+  d.addEventListener('dragstart', ev => ev.dataTransfer.setData('text/node-type', type));
+  d.addEventListener('dblclick', () => addNodeAtCenter(type));
+  palList.appendChild(d);
+}
+wrap.addEventListener('dragover', ev => ev.preventDefault());
+wrap.addEventListener('drop', ev => {
+  ev.preventDefault();
+  const p = screenToWorld(ev.clientX, ev.clientY);
+  const modId = ev.dataTransfer.getData('text/fm-module');
+  if (modId) {
+    const meta = fmMetas.find(m => m.id === modId);
+    if (meta) addModuleNode(meta, p.x - 105, p.y - 20);
+    return;
+  }
+  const type = ev.dataTransfer.getData('text/node-type');
+  if (!type) return;
+  addNode(type, p.x - 105, p.y - 20);
+});
+function canvasCenterWorld() {
+  const r = wrap.getBoundingClientRect();
+  return screenToWorld(r.left + r.width / 2 + (Math.random() * 60 - 30), r.top + r.height / 2 + (Math.random() * 60 - 30));
+}
+function addNodeAtCenter(type) {
+  const p = canvasCenterWorld();
+  addNode(type, p.x - 105, p.y - 20);
+}
+
+/* ── FlowMap 模組（可見的 FlowMap 當作節點引用）── */
+function addModuleNode(meta, x, y) {
+  pushHistory();
+  const n = {
+    id: uid(), type: 'subflow', x: Math.round(x), y: Math.round(y),
+    params: {
+      fmId: meta.id,
+      _fmName: meta.name,
+      _ports: JSON.parse(JSON.stringify(meta.ports)),   // 埠快照；開啟 FlowMap 時會與來源同步
+    },
+  };
+  state.nodes.push(n);
+  setSelection({ kind: 'node', id: n.id });
+  renderAll();
+  return n;
+}
+/* 左側「FlowMap 模組」區：列出可引用的 FlowMap——同 Project 或已 🌐 公開的
+   （排除自己與會造成循環的來源） */
+function renderModulePalette() {
+  const head = $('#pal-mods-head'), box = $('#pal-mods');
+  const mods = moduleCandidates();
+  head.style.display = mods.length ? '' : 'none';
+  box.innerHTML = '';
+  for (const m of mods) {
+    const d = document.createElement('div');
+    d.className = 'pal-item'; d.draggable = true;
+    d.title = `引用 FlowMap「${m.name}」（${m.ports.inputs.length} 個輸入埠 / ${m.ports.outputs.length} 個輸出埠，執行最後儲存的版本）`;
+    d.innerHTML = `<span class="swatch" style="background:var(--c-subflow)"></span>🧩 ${esc(m.name)}`;
+    d.addEventListener('dragstart', ev => ev.dataTransfer.setData('text/fm-module', m.id));
+    d.addEventListener('dblclick', () => {
+      const p = canvasCenterWorld();
+      addModuleNode(m, p.x - 105, p.y - 20);
+    });
+    box.appendChild(d);
+  }
+}
+/* 複製一組節點：連同「兩端都在選取範圍內」的連線一起複製 */
+function duplicateNodes(ids) {
+  const src = state.nodes.filter(n => ids.includes(n.id));
+  if (!src.length) return;
+  pushHistory();
+  const map = {};
+  const copies = src.map(n => {
+    const cp = JSON.parse(JSON.stringify(n));
+    cp.id = uid(); cp.x += 40; cp.y += 40;
+    map[n.id] = cp.id;
+    return cp;
+  });
+  const inner = state.edges.filter(e => map[e.from.node] && map[e.to.node]);
+  state.nodes.push(...copies);
+  for (const e of inner) state.edges.push({
+    id: uid(),
+    from: { node: map[e.from.node], port: e.from.port },
+    to:   { node: map[e.to.node],   port: e.to.port },
+  });
+  setSelectedNodes(copies.map(c => c.id));
+  renderAll();
+}
+
+function addNode(type, x, y) {
+  pushHistory();
+  const t = NodeTypes[type];
+  const params = {};
+  for (const p of t.params) params[p.key] = p.def;
+  const n = { id: uid(), type, x: Math.round(x), y: Math.round(y), params };
+  state.nodes.push(n);
+  setSelection({ kind: 'node', id: n.id });
+  renderAll();
+  return n;
+}
+
+/* 建立一條連線；回傳是否真的新增（不含 pushHistory，由呼叫端負責） */
+function connect(from, to) {
+  if (!from || !to || from.node === to.node) return false;
+  const dup = state.edges.some(e => e.from.node === from.node && e.from.port === from.port
+                                 && e.to.node === to.node && e.to.port === to.port);
+  if (dup) return false;
+  const pin = typeOf(nodeById(to.node)).inputs.find(p => p.name === to.port);
+  // multi 埠允許多條線；一般輸入埠只允許一條（取代舊的）
+  if (!pin?.multi) state.edges = state.edges.filter(e => !(e.to.node === to.node && e.to.port === to.port));
+  state.edges.push({ id: uid(), from, to });
+  return true;
+}
+
+/* ---------- 畫布互動 ----------
+   平移：中鍵拖曳，或 Space + 左鍵拖曳（畫布任何位置皆可，含節點上方）
+   框選：左鍵在空白處拖曳（按住 Shift 為加選）
+   節點清單：空白處按右鍵
+   拖節點：左鍵拖節點；該節點在選取集合內時整組一起移動
+   拉線：從埠 ● 拖到另一個埠                                        */
+let drag = null;          // {mode:'pan'|'marquee'|'node'|'wire', ...}
+let spaceDown = false;
+const mq = $('#marquee');
+
+function setPanCursor() { wrap.classList.toggle('panready', spaceDown && !drag); }
+window.addEventListener('keydown', ev => {
+  if (ev.code !== 'Space' || ev.repeat) return;
+  if (ev.target.matches?.('input,textarea,select,button') || ev.target.isContentEditable) return;
+  spaceDown = true; setPanCursor();
+  ev.preventDefault();               // 避免頁面捲動
+});
+window.addEventListener('keyup', ev => { if (ev.code === 'Space') { spaceDown = false; setPanCursor(); } });
+window.addEventListener('blur', () => { spaceDown = false; setPanCursor(); });
+wrap.addEventListener('auxclick', ev => { if (ev.button === 1) ev.preventDefault(); });  // 擋中鍵自動捲動
+
+wrap.addEventListener('mousedown', ev => {
+  // ── 平移（最優先，不管游標下是什麼）
+  if (ev.button === 1 || (ev.button === 0 && spaceDown)) {
+    ev.preventDefault();
+    drag = { mode: 'pan', sx: ev.clientX, sy: ev.clientY, otx: state.view.tx, oty: state.view.ty };
+    wrap.classList.add('panning'); wrap.classList.remove('panready');
+    return;
+  }
+  // ── 執行控制浮動窗：面板上的按鈕與標題列自己處理，不進畫布分派（放在平移之後：中鍵／Space 仍可平移）
+  if (ev.target.closest('#runpanel')) { closeMenus(); return; }
+  if (ev.button !== 0) return;       // 右鍵交給 contextmenu
+  closeMenus();
+
+  const portEl = ev.target.closest('.port');
+  const nodeEl = ev.target.closest('.node');
+
+  // ── 拉線
+  if (portEl && !state.running) {
+    const nid = nodeEl.dataset.id, port = portEl.dataset.port, dir = portEl.dataset.dir;
+    drag = { mode: 'wire', from: { node: nid, port, dir }, tempPath: null };
+    const tp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    tp.classList.add('temp'); edgeSvg.appendChild(tp); drag.tempPath = tp;
+    ev.preventDefault(); return;
+  }
+
+  // ── 節點：選取 + 拖曳（選取集合內則整組拖）
+  if (nodeEl) {
+    const n = nodeById(nodeEl.dataset.id);
+    if (ev.shiftKey) {
+      const next = new Set(state.selected);
+      if (next.has(n.id)) {                      // 退選：不進入拖曳
+        next.delete(n.id);
+        setSelectedNodes(next);
+        renderAll(); ev.preventDefault(); return;
+      }
+      next.add(n.id);
+      setSelectedNodes(next, n.id);              // 加選，檢查器顯示剛點到的這顆
+      renderAll();
+    } else if (!state.selected.has(n.id)) {
+      setSelection({ kind: 'node', id: n.id });
+      renderAll();
+    } else if (state.selection?.id !== n.id) {
+      setSelectedNodes(state.selected, n.id);    // 整組保留，檢查器換成這顆
+      renderInspector();
+    }
+    const p = screenToWorld(ev.clientX, ev.clientY);
+    const group = state.nodes.filter(x => state.selected.has(x.id));
+    drag = {
+      mode: 'node', moved: false,
+      items: (group.length ? group : [n]).map(g => ({ n: g, ox: p.x - g.x, oy: p.y - g.y })),
+    };
+    ev.preventDefault(); return;
+  }
+
+  // ── 空白處：框選
+  const w = screenToWorld(ev.clientX, ev.clientY);
+  drag = {
+    mode: 'marquee', sx: ev.clientX, sy: ev.clientY, wx: w.x, wy: w.y,
+    base: ev.shiftKey ? new Set(state.selected) : new Set(),
+    hit: ev.shiftKey ? new Set(state.selected) : new Set(), moved: false,
+  };
+  if (!ev.shiftKey && (state.selection || state.selected.size)) { setSelection(null); renderAll(); }
+});
+
+window.addEventListener('mousemove', ev => {
+  if (!drag) return;
+  if (drag.mode === 'pan') {
+    state.view.tx = drag.otx + (ev.clientX - drag.sx);
+    state.view.ty = drag.oty + (ev.clientY - drag.sy);
+    applyView();
+
+  } else if (drag.mode === 'panel') {
+    drag.moved = true;
+    placeRunPanel(ev.clientX - drag.wr.left - drag.ox, ev.clientY - drag.wr.top - drag.oy);
+
+  } else if (drag.mode === 'marquee') {
+    drag.moved = true;
+    const r = wrap.getBoundingClientRect();
+    const x1 = Math.min(drag.sx, ev.clientX), x2 = Math.max(drag.sx, ev.clientX);
+    const y1 = Math.min(drag.sy, ev.clientY), y2 = Math.max(drag.sy, ev.clientY);
+    mq.style.display = 'block';
+    mq.style.left = (x1 - r.left) + 'px'; mq.style.top = (y1 - r.top) + 'px';
+    mq.style.width = (x2 - x1) + 'px';    mq.style.height = (y2 - y1) + 'px';
+    // 世界座標命中測試（矩形相交即選中）
+    const p = screenToWorld(ev.clientX, ev.clientY);
+    const wx1 = Math.min(drag.wx, p.x), wx2 = Math.max(drag.wx, p.x);
+    const wy1 = Math.min(drag.wy, p.y), wy2 = Math.max(drag.wy, p.y);
+    const hit = new Set(drag.base);
+    for (const n of state.nodes) {
+      const el = nodeLayer.querySelector(`.node[data-id="${n.id}"]`);
+      const w = el ? el.offsetWidth : 210, h = el ? el.offsetHeight : 64;
+      if (n.x < wx2 && n.x + w > wx1 && n.y < wy2 && n.y + h > wy1) hit.add(n.id);
+    }
+    drag.hit = hit;                             // 只切 class，不動狀態、不整頁重繪
+    for (const el of nodeLayer.children) el.classList.toggle('selected', hit.has(el.dataset.id));
+
+  } else if (drag.mode === 'node') {
+    if (!drag.moved) { pushHistory(); drag.moved = true; }
+    const p = screenToWorld(ev.clientX, ev.clientY);
+    for (const it of drag.items) {
+      it.n.x = Math.round(p.x - it.ox); it.n.y = Math.round(p.y - it.oy);
+      const el = nodeLayer.querySelector(`.node[data-id="${it.n.id}"]`);
+      if (el) { el.style.left = it.n.x + 'px'; el.style.top = it.n.y + 'px'; }
+    }
+    renderEdges();
+
+  } else if (drag.mode === 'wire') {
+    const p = screenToWorld(ev.clientX, ev.clientY);
+    const anchor = portPos(drag.from.node, drag.from.port, drag.from.dir);
+    if (anchor) drag.tempPath.setAttribute('d',
+      drag.from.dir === 'out' ? edgePath(anchor, p) : edgePath(p, anchor));
+  }
+});
+
+window.addEventListener('mouseup', ev => {
+  if (!drag) return;
+  if (drag.mode === 'pan') {
+    wrap.classList.remove('panning');
+
+  } else if (drag.mode === 'panel') {
+    runPanel.classList.remove('dragging');
+    if (drag.moved) saveRunPanelPos();   // 沒真的拖過就不要存：那時 style.left 是空字串，會存成 (0,0)
+
+  } else if (drag.mode === 'marquee') {
+    mq.style.display = 'none';
+    if (drag.moved) { setSelectedNodes(drag.hit); renderAll(); }
+
+  } else if (drag.mode === 'wire') {
+    drag.tempPath.remove();
+    const targetPort = ev.target.closest?.('.port');
+    if (targetPort) {
+      const tNode = targetPort.closest('.node').dataset.id;
+      const tName = targetPort.dataset.port, tDir = targetPort.dataset.dir;
+      let from, to;
+      if (drag.from.dir === 'out' && tDir === 'in') { from = { node: drag.from.node, port: drag.from.port }; to = { node: tNode, port: tName }; }
+      else if (drag.from.dir === 'in' && tDir === 'out') { from = { node: tNode, port: tName }; to = { node: drag.from.node, port: drag.from.port }; }
+      if (from) {
+        const before = snapshot();               // 先試接，重複連線就什麼都不記錄
+        if (connect(from, to)) { pushHistory(before); renderAll(); }
+      }
+    } else if (!ev.target.closest?.('.node') && wrap.contains(ev.target)) {
+      // 拉到畫布空白處放開 → 開節點清單，選完自動接線
+      openCtxMenu(ev.clientX, ev.clientY, drag.from);
+    }
+  }
+  drag = null;
+  setPanCursor();
+});
+
+/* ---------- 右鍵選單 ----------
+   空白處右鍵 / 從埠拉線到空白處 → #ctxmenu（節點清單，可搜尋）
+   節點上右鍵                    → #nodemenu（重新命名 / 複製 / 斷開連線 / 刪除）  */
+const ctxMenu = $('#ctxmenu'), ctxSearch = $('#ctx-search'), ctxList = $('#ctx-list'), ctxHint = $('#ctx-hint');
+const nodeMenu = $('#nodemenu');
+let ctxWorld = null, ctxHits = [], ctxIdx = 0;
+let ctxWire = null;        // 由拉線帶入：{node, port, dir}；選完節點會自動接線
+let nodeMenuIds = [];
+
+function closeCtxMenu() { ctxMenu.classList.remove('show'); ctxWire = null; }
+function closeNodeMenu() { nodeMenu.classList.remove('show'); nodeMenuIds = []; }
+function closeMenus() { closeCtxMenu(); closeNodeMenu(); }
+
+function placeMenu(el, cx, cy) {
+  const r = el.getBoundingClientRect();
+  el.style.left = Math.max(6, Math.min(cx, window.innerWidth  - r.width  - 8)) + 'px';
+  el.style.top  = Math.max(6, Math.min(cy, window.innerHeight - r.height - 8)) + 'px';
+}
+
+/* ── 節點清單（可帶著一條待接的線） */
+function openCtxMenu(cx, cy, wire) {
+  closeNodeMenu();
+  ctxWire = wire || null;
+  ctxWorld = screenToWorld(cx, cy);
+  ctxMenu.classList.toggle('wire', !!ctxWire);
+  if (ctxWire) {
+    const src = nodeById(ctxWire.node);
+    const nm = src ? (src.params._label || typeOf(src).title) : '?';
+    ctxHint.textContent = ctxWire.dir === 'out'
+      ? `接到「${nm}」的下游 — 只列出可接收輸入的節點`
+      : `接到「${nm}」的上游 — 只列出有輸出的節點`;
+  }
+  ctxSearch.value = '';
+  renderCtxList('');
+  ctxMenu.classList.add('show');
+  placeMenu(ctxMenu, cx, cy);
+  ctxSearch.focus();
+}
+/* 依待接的線過濾：接不上的節點型別不列出。
+   清單＝內建節點型別＋可引用的 FlowMap 模組（key 為 'fm:<id>'）。 */
+function ctxCandidates() {
+  const base = Object.entries(NodeTypes)
+    .filter(([type]) => type !== 'subflow')   // 通用的 subflow 沒有來源，不列；模組項在下面逐一列出
+    .map(([type, t]) =>
+      ({ key: type, title: t.title, color: t.color, icon: t.icon, ins: t.inputs.length, outs: t.outputs.length }));
+  const mods = moduleCandidates().map(m =>
+    ({ key: 'fm:' + m.id, title: m.name, color: 'var(--c-subflow)', icon: '🧩', ins: m.ports.inputs.length, outs: m.ports.outputs.length }));
+  return [...base, ...mods].filter(c =>
+    !ctxWire || (ctxWire.dir === 'out' ? c.ins > 0 : c.outs > 0));
+}
+function renderCtxList(q) {
+  const k = q.trim().toLowerCase();
+  ctxHits = ctxCandidates().filter(c =>
+    !k || c.title.toLowerCase().includes(k) || c.key.toLowerCase().includes(k));
+  ctxIdx = 0;
+  ctxList.innerHTML = ctxHits.length
+    ? ctxHits.map((c, i) =>
+        `<div class="ctx-item${i === 0 ? ' active' : ''}" data-type="${c.key}">` +
+        `<span class="swatch" style="background:${c.color}"></span>${c.icon} ${esc(c.title)}</div>`).join('')
+    : '<div class="ctx-empty">找不到符合的節點</div>';
+}
+function ctxAdd(key) {
+  if (!key || !ctxWorld) return;
+  const wire = ctxWire;
+  const meta = key.startsWith('fm:') ? fmMetas.find(m => m.id === key.slice(3)) : null;
+  if (key.startsWith('fm:') && !meta) { closeCtxMenu(); return; }
+  // 有待接的線：讓節點靠著游標往資料流方向擺；否則以游標為中心
+  const x = wire ? (wire.dir === 'out' ? ctxWorld.x + 8 : ctxWorld.x - 218) : ctxWorld.x - 105;
+  const n = meta
+    ? addModuleNode(meta, x, ctxWorld.y - 20)          // addModuleNode 內已 pushHistory
+    : addNode(key, x, ctxWorld.y - 20);                // addNode 內已 pushHistory
+  if (wire) {
+    const t = typeOf(n);                                // 模組的埠是動態的，用 typeOf 取
+    if (wire.dir === 'out' && t.inputs.length)
+      connect({ node: wire.node, port: wire.port }, { node: n.id, port: t.inputs[0].name });
+    else if (wire.dir === 'in' && t.outputs.length)
+      connect({ node: n.id, port: t.outputs[0].name }, { node: wire.node, port: wire.port });
+    renderAll();
+  }
+  closeCtxMenu();
+}
+ctxSearch.addEventListener('input', () => renderCtxList(ctxSearch.value));
+ctxSearch.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') { ev.stopPropagation(); closeCtxMenu(); return; }
+  if (ev.key === 'Enter')  { ev.preventDefault(); ctxAdd(ctxHits[ctxIdx]?.key); return; }
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    if (!ctxHits.length) return;
+    ctxIdx = (ctxIdx + (ev.key === 'ArrowDown' ? 1 : ctxHits.length - 1)) % ctxHits.length;
+    [...ctxList.children].forEach((el, i) => el.classList.toggle('active', i === ctxIdx));
+    ctxList.children[ctxIdx]?.scrollIntoView({ block: 'nearest' });
+  }
+});
+ctxList.addEventListener('mousedown', ev => {
+  const it = ev.target.closest('.ctx-item');
+  if (it) { ev.preventDefault(); ctxAdd(it.dataset.type); }
+});
+
+/* ── 節點指令選單 */
+function openNodeMenu(cx, cy, ids) {
+  closeCtxMenu();
+  nodeMenuIds = ids.filter(id => nodeById(id));
+  if (!nodeMenuIds.length) return;
+  const many = nodeMenuIds.length > 1;
+  const n = nodeById(nodeMenuIds[0]);
+  const title = many ? `已選取 ${nodeMenuIds.length} 個節點`
+                     : esc(n.params._label || typeOf(n).title);
+  const linked = state.edges.filter(e => nodeMenuIds.includes(e.from.node) || nodeMenuIds.includes(e.to.node)).length;
+  nodeMenu.innerHTML =
+    `<div class="mhead">${title}</div>` +
+    (many ? '' : `<button data-act="rename">✎ 重新命名<span class="mk">F2</span></button>`) +
+    `<button data-act="dup">⧉ 複製${many ? '這組' : '節點'}<span class="mk">Ctrl+D</span></button>` +
+    `<button data-act="unlink"${linked ? '' : ' disabled'}>✂ 斷開所有連線${linked ? `（${linked}）` : ''}</button>` +
+    `<div class="msep"></div>` +
+    `<button class="danger" data-act="del">🗑 刪除${many ? '這組' : '節點'}<span class="mk">Del</span></button>`;
+  nodeMenu.classList.add('show');
+  placeMenu(nodeMenu, cx, cy);
+}
+function removeNodes(ids) {
+  pushHistory();
+  state.nodes = state.nodes.filter(n => !ids.includes(n.id));
+  state.edges = state.edges.filter(e => !ids.includes(e.from.node) && !ids.includes(e.to.node));
+  setSelection(null); renderAll();
+}
+function unlinkNodes(ids) {
+  const rest = state.edges.filter(e => !ids.includes(e.from.node) && !ids.includes(e.to.node));
+  if (rest.length === state.edges.length) return;
+  pushHistory(); state.edges = rest; renderAll();
+}
+function startRename(id) {
+  const n = nodeById(id);
+  if (!n) return;
+  const t = typeOf(n);
+  nodeMenu.innerHTML = `<div class="mhead">重新命名（Enter 確定 / Esc 取消）</div>` +
+    `<input class="rn-input" value="${esc(n.params._label || '')}" placeholder="${esc(t.title)}" spellcheck="false">`;
+  const inp = nodeMenu.querySelector('.rn-input');
+  inp.focus(); inp.select();
+  inp.addEventListener('keydown', ev => {
+    ev.stopPropagation();
+    if (ev.key === 'Enter') {
+      pushHistory();
+      const v = inp.value.trim();
+      if (v) n.params._label = v; else delete n.params._label;
+      closeNodeMenu(); renderAll();
+    } else if (ev.key === 'Escape') { closeNodeMenu(); }
+  });
+  inp.addEventListener('blur', () => closeNodeMenu());
+}
+nodeMenu.addEventListener('click', ev => {
+  const btn = ev.target.closest('button[data-act]');
+  if (!btn || btn.disabled) return;
+  const ids = nodeMenuIds.slice(), act = btn.dataset.act;
+  if (act === 'rename') { startRename(ids[0]); return; }   // 選單就地變成輸入框
+  closeNodeMenu();
+  if (act === 'dup') duplicateNodes(ids);
+  else if (act === 'unlink') unlinkNodes(ids);
+  else if (act === 'del') removeNodes(ids);
+});
+
+/* ── 右鍵分派：節點上 → 指令選單；空白處 → 節點清單；連線上 → 不開 */
+wrap.addEventListener('contextmenu', ev => {
+  ev.preventDefault();
+  if (ev.target.closest('#runpanel')) return;     // 浮動窗上不開畫布選單（原生選單也一併擋掉）
+  const nodeEl = ev.target.closest('.node');
+  if (nodeEl) {
+    const n = nodeById(nodeEl.dataset.id);
+    if (!n) return;
+    if (!state.selected.has(n.id)) { setSelection({ kind: 'node', id: n.id }); renderAll(); }
+    openNodeMenu(ev.clientX, ev.clientY, [...state.selected]);   // 已框選的整組沿用
+    return;
+  }
+  if (ev.target.closest('path.edge')) { closeMenus(); return; }
+  openCtxMenu(ev.clientX, ev.clientY, null);
+});
+
+document.addEventListener('mousedown', ev => {
+  if (!ev.target.closest('#ctxmenu')) closeCtxMenu();
+  if (!ev.target.closest('#nodemenu')) closeNodeMenu();
+});
+window.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeMenus(); });
+
+/* 點選連線 */
+edgeSvg.style.pointerEvents = 'none';
+wrap.addEventListener('click', ev => {
+  // svg path 的 pointer-events:stroke 由 CSS 控制，但 svg 容器 none → 手動命中測試
+}, true);
+// 讓 path 可點：svg 需要接收事件
+edgeSvg.style.pointerEvents = '';
+edgeSvg.addEventListener('mousedown', ev => {
+  if (ev.button !== 0 || spaceDown) return;
+  const path = ev.target.closest('path.edge');
+  if (path) {
+    closeMenus();                 // 下面 stopPropagation 會擋掉 document 的關閉邏輯，這裡自己關
+    setSelection({ kind: 'edge', id: path.dataset.id });
+    renderAll();
+    ev.stopPropagation();
+  }
+});
+
+/* 縮放 */
+wrap.addEventListener('wheel', ev => {
+  if (ev.target.closest('#runpanel')) return;     // 滾到浮動窗上不縮放畫布
+  ev.preventDefault();
+  const { s } = state.view;
+  const ns = Math.min(2.5, Math.max(0.25, s * (ev.deltaY < 0 ? 1.1 : 0.9)));
+  const r = wrap.getBoundingClientRect();
+  const cx = ev.clientX - r.left, cy = ev.clientY - r.top;
+  state.view.tx = cx - (cx - state.view.tx) * (ns / s);
+  state.view.ty = cy - (cy - state.view.ty) * (ns / s);
+  state.view.s = ns;
+  applyView();
+}, { passive: false });
+
+/* ---------- 執行控制浮動窗 ----------
+   預設停在畫布右下角；拖標題列可移動，雙擊標題列回到預設位置。
+   位置是使用者偏好，存在瀏覽器本機——不進圖的資料（否則存檔會被判定成有變更）。 */
+const runPanel = $('#runpanel'), rpHead = $('#rp-head');
+const RP_POS_KEY = 'wfg.runPanelPos';
+
+/* 夾在畫布可視範圍內，避免縮視窗後整個窗跑到看不見的地方 */
+function placeRunPanel(x, y) {
+  const r = wrap.getBoundingClientRect(), p = runPanel.getBoundingClientRect();
+  const cx = Math.min(Math.max(0, x), Math.max(0, r.width - p.width));
+  const cy = Math.min(Math.max(0, y), Math.max(0, r.height - p.height));
+  runPanel.style.left = cx + 'px'; runPanel.style.top = cy + 'px';
+  runPanel.style.right = 'auto'; runPanel.style.bottom = 'auto';
+}
+function saveRunPanelPos() {
+  try {
+    localStorage.setItem(RP_POS_KEY, JSON.stringify({
+      x: parseFloat(runPanel.style.left) || 0, y: parseFloat(runPanel.style.top) || 0,
+    }));
+  } catch {}
+}
+function resetRunPanelPos() {
+  runPanel.style.left = runPanel.style.top = runPanel.style.right = runPanel.style.bottom = '';
+  try { localStorage.removeItem(RP_POS_KEY); } catch {}
+}
+try {
+  const saved = JSON.parse(localStorage.getItem(RP_POS_KEY) || 'null');
+  if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) placeRunPanel(saved.x, saved.y);
+} catch {}
+
+rpHead.addEventListener('mousedown', ev => {
+  if (ev.button !== 0 || spaceDown) return;       // 中鍵／Space+左鍵一律讓給平移
+  const r = wrap.getBoundingClientRect(), p = runPanel.getBoundingClientRect();
+  drag = { mode: 'panel', ox: ev.clientX - p.left, oy: ev.clientY - p.top, wr: r, moved: false };
+  runPanel.classList.add('dragging');
+  ev.preventDefault();
+});
+rpHead.addEventListener('dblclick', resetRunPanelPos);
+/* 按完就放掉焦點：不然接著按 Space（平移修飾鍵）會被瀏覽器當成又按了一次這顆按鈕 */
+runPanel.addEventListener('click', ev => { const b = ev.target.closest('button'); if (b) b.blur(); });
+window.addEventListener('resize', () => {
+  if (runPanel.style.left) placeRunPanel(parseFloat(runPanel.style.left), parseFloat(runPanel.style.top));
+});
+
+/* 資訊列的狀態字（純顯示，不影響圖的資料） */
+function setRunState(text, cls) {
+  const el = $('#rp-state');
+  el.textContent = text; el.className = cls || '';
+}
+
+/* ---------- 鍵盤 ---------- */
+window.addEventListener('keydown', ev => {
+  if (inOverview()) return;   // 總覽頁開啟時，畫布快捷鍵一律停用
+  if (document.getElementById('modal-mask')?.classList.contains('show')) return; // 對話框開啟時同樣停用
+  if (ev.target.matches('input,textarea,select')) return;
+  if ((ev.key === 'Delete' || ev.key === 'Backspace') && (state.selected.size || state.selection)) {
+    pushHistory();
+    if (state.selected.size) {                       // 節點（單選或多選）
+      const ids = state.selected;
+      state.nodes = state.nodes.filter(n => !ids.has(n.id));
+      state.edges = state.edges.filter(e => !ids.has(e.from.node) && !ids.has(e.to.node));
+    } else if (state.selection.kind === 'edge') {
+      state.edges = state.edges.filter(e => e.id !== state.selection.id);
+    }
+    setSelection(null); renderAll();
+  }
+  if (ev.ctrlKey && ev.key.toLowerCase() === 'z') { ev.preventDefault(); undo(); }
+  if (ev.ctrlKey && (ev.key.toLowerCase() === 'y' || (ev.shiftKey && ev.key.toLowerCase() === 'z'))) { ev.preventDefault(); redo(); }
+  if (ev.ctrlKey && ev.key.toLowerCase() === 'd' && state.selected.size) {
+    ev.preventDefault();
+    duplicateNodes([...state.selected]);
+  }
+  if (ev.key === 'F2' && state.selected.size === 1) {
+    ev.preventDefault();
+    const n = nodeById([...state.selected][0]);
+    if (n) {
+      const r = wrap.getBoundingClientRect(), v = state.view;
+      openNodeMenu(r.left + (n.x + 30) * v.s + v.tx, r.top + (n.y + 30) * v.s + v.ty, [n.id]);
+      startRename(n.id);
+    }
+  }
+  if (ev.ctrlKey && ev.key.toLowerCase() === 'a' && !state.running) {
+    ev.preventDefault();
+    setSelectedNodes(state.nodes.map(n => n.id));
+    renderAll();
+  }
+});
+
+/* ---------- 檢查器 ---------- */
+const INSPECTOR_EMPTY_HTML = $('#insp-empty').innerHTML;
+function renderInspector() {
+  const form = $('#insp-form'), empty = $('#insp-empty');
+  if (state.selection?.kind !== 'node') {
+    form.style.display = 'none'; empty.style.display = 'block';
+    empty.innerHTML = state.selected.size > 1
+      ? `已選取 <b>${state.selected.size}</b> 個節點。<br><br>拖曳其中任一顆可整組移動；` +
+        `<kbd>Del</kbd> 整組刪除、<kbd>Ctrl+D</kbd> 整組複製（節點之間的連線一併複製）。<br><br>` +
+        `<kbd>Shift</kbd>+點擊可加選或退選，點畫布空白處取消全部選取。`
+      : INSPECTOR_EMPTY_HTML;
+    return;
+  }
+  const n = nodeById(state.selection.id);
+  if (!n) { form.style.display = 'none'; empty.style.display = 'block'; return; }
+  const t = typeOf(n);
+  empty.style.display = 'none'; form.style.display = 'block';
+
+  let h = `<h3><span class="dot" style="width:10px;height:10px;border-radius:3px;background:${t.color};display:inline-block"></span>${t.icon} ${t.title}<span class="type-tag">#${n.id}</span></h3>`;
+  h += `<label>節點名稱（顯示用）</label><input data-pkey="_label" value="${esc(n.params._label || '')}" placeholder="${esc(t.title)}">`;
+  for (const p of t.params) {
+    h += `<label>${esc(p.label)}</label>`;
+    const v = n.params[p.key] ?? p.def ?? '';   // 舊圖沒有的新參數，顯示型別預設值
+    if (p.kind === 'textarea') h += `<textarea data-pkey="${p.key}" rows="4">${esc(v)}</textarea>`;
+    else if (p.kind === 'select') h += `<select data-pkey="${p.key}">${p.options.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    else if (p.kind === 'number') h += `<input type="number" data-pkey="${p.key}" value="${esc(v)}" step="${p.step ?? 1}" ${p.min !== undefined ? `min="${p.min}"` : ''} ${p.max !== undefined ? `max="${p.max}"` : ''}>`;
+    else if (p.kind === 'file' || p.kind === 'folder')
+      h += `<div class="filerow"><input data-pkey="${p.key}" value="${esc(v)}" list="dl-recent-${p.key}-${p.kind}" placeholder="${esc(p.ph ?? (p.kind === 'folder' ? '或按「瀏覽」選擇資料夾' : '或按「瀏覽」選擇檔案'))}"><button class="browse" data-mode="${p.kind}" data-for="${p.key}" title="開啟系統${p.kind === 'folder' ? '資料夾' : '檔案'}選擇視窗">📂 瀏覽</button></div>` +
+        `<datalist id="dl-recent-${p.key}-${p.kind}">${recentPaths(p.kind).map(rp => `<option value="${esc(rp)}">`).join('')}</datalist>`;
+    else h += `<input data-pkey="${p.key}" value="${esc(v)}">`;
+  }
+  // FlowMap 模組：顯示來源與埠資訊（來源不在檢查器改，去總覽開那個 FlowMap）
+  if (n.type === 'subflow') {
+    const ports = n.params._ports || { inputs: [], outputs: [] };
+    h += `<label>來源 FlowMap</label>` +
+      `<div class="srcs-empty">${isModuleMissing(n)
+        ? '⚠ 來源已不存在 — 執行會失敗。刪掉這個節點，或還原來源檔案。'
+        : `🧩 ${esc(n.params._fmName || n.params.fmId)}<br>` +
+          `${ports.inputs.length} 個輸入埠（來源的「📥 節點輸入」）、${ports.outputs.length} 個輸出埠（來源的「📤 節點輸出」）。<br>` +
+          `執行時載入來源<b>最後儲存的版本</b>；埠定義在開啟本 FlowMap 時自動同步。<br>` +
+          `輸入埠沒接線時，使用來源節點輸入自己填的預設值。`}</div>`;
+  }
+  // 有 multi 輸入埠的節點：列出已連接的上游節點
+  const multiPin = t.inputs.find(p => p.multi);
+  if (multiPin) {
+    const es = state.edges.filter(e => e.to.node === n.id && e.to.port === multiPin.name);
+    h += `<label>已連接的輸入（${es.length}）${n.type === 'template' && es.length ? '— 點一下插入 @引用' : ''}</label>`;
+    if (!es.length) {
+      h += `<div class="srcs-empty">尚未連接。從上游節點的輸出埠拉線到左側的輸入埠（同一個埠可接多條）。</div>`;
+    } else {
+      const labels = es.map(e => {
+        const sn = nodeById(e.from.node);
+        return sn ? (sn.params._label || typeOf(sn).title) : '?';
+      });
+      h += '<div class="srcs">' + es.map((e, i) => {
+        const sn = nodeById(e.from.node);
+        if (!sn) return '';
+        const st = typeOf(sn);
+        return `<span class="src-chip" data-ref="${esc(labels[i])}" title="來自 ${esc(labels[i])} 的輸出"><i style="background:${st.color}"></i>@${esc(labels[i])}</span>`;
+      }).join('') + '</div>';
+      if (new Set(labels).size !== labels.length)
+        h += `<div class="srcs-warn">⚠ 有節點名稱重複，@引用會指到同名的第一個 — 建議在各上游節點的「節點名稱」欄取不同名字。</div>`;
+    }
+  }
+  h += `<div class="btnrow"><button data-act="dup">⧉ 複製</button><button data-act="del" style="color:var(--red)">🗑 刪除節點</button></div>`;
+
+  const r = state.results[n.id];
+  if (r?.usage) {
+    const u = r.usage;
+    h += `<div id="insp-usage"><label>上一次執行的用量</label><div class="usage-grid">` +
+      `<span class="k">輸入</span><span>${u.in.toLocaleString()} tok</span>` +
+      (u.cacheRead || u.cacheWrite
+        ? `<span class="k">　新送出</span><span>${u.fresh.toLocaleString()} tok</span>` +
+          `<span class="k">　快取讀取</span><span>${u.cacheRead.toLocaleString()} tok</span>` +
+          `<span class="k">　快取建立</span><span>${u.cacheWrite.toLocaleString()} tok</span>`
+        : '') +
+      `<span class="k">輸出</span><span>${u.out.toLocaleString()} tok</span>` +
+      (u.costUsd ? `<span class="k">費用</span><span>${fmtUsd(u.costUsd)}</span>` : '') +
+      (u.durationMs ? `<span class="k">耗時</span><span>${(u.durationMs / 1000).toFixed(1)}s</span>` : '') +
+      (u.calls > 1 ? `<span class="k">AI 呼叫</span><span>${u.calls} 次</span>` : '') +
+      `</div></div>`;
+  }
+  if (r && r.status === 'skipped') {
+    const why = r.cause === 'error'
+      ? '⊘ 此節點未執行（上游節點執行失敗）。\n請往上游找標紅的節點看錯誤訊息；修好後重跑，這顆才會有輸出值。'
+      : '⊘ 此節點未執行（上游分支未選中）。\n它沒有產生任何輸出值，連往下游的線也沒有資料通過——下游若還是執行了，資料一定來自別條線。';
+    h += `<div id="insp-result"><label>最近一次執行結果</label><pre style="color:#a08a94">${esc(why)}</pre></div>`;
+  } else if (r && (r.output !== undefined || r.error)) {
+    // FlowMap 模組：逐一列出每個輸出埠的值（沒跑到的埠標 ⊘）
+    const shown = (!r.error && n.type === 'subflow')
+      ? (t.outputs.length
+          ? t.outputs.map(p => `【${p.label}】` + (Object.prototype.hasOwnProperty.call(r.output, p.name)
+              ? clip(String(r.output[p.name]), 400) : '⊘ 未輸出（該分支未選中）')).join('\n')
+          : '（此模組沒有輸出埠）')
+      : displayVal(r.output);
+    h += `<div id="insp-result"><label>最近一次執行結果</label><pre class="${r.error ? 'err' : ''}" style="${r.error ? 'color:var(--red)' : ''}">${esc(r.error || shown)}</pre></div>`;
+  }
+  form.innerHTML = h;
+
+  form.querySelectorAll('.src-chip').forEach(ch => {
+    ch.addEventListener('click', () => {
+      const ta = form.querySelector('textarea[data-pkey="template"]');
+      if (!ta) return;
+      const ref = '@' + ch.dataset.ref;
+      const st = ta.selectionStart ?? ta.value.length;
+      const en = ta.selectionEnd ?? st;
+      ta.value = ta.value.slice(0, st) + ref + ta.value.slice(en);
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = st + ref.length;
+      ta.dispatchEvent(new Event('change'));
+    });
+  });
+  form.querySelectorAll('.browse').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; btn.textContent = '選擇中…';
+      try {
+        // 起始位置：欄位目前的值優先，其次是最近用過的路徑（讓視窗開在上次的地方）
+        const cur = form.querySelector(`input[data-pkey="${btn.dataset.for}"]`)?.value?.trim();
+        const start = cur || recentPaths(btn.dataset.mode)[0] || '';
+        const res = await fetch('/api/pick', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: btn.dataset.mode, start: start || undefined }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (d.error) { log('檔案選擇：' + d.error, 'wr'); }
+        else if (d.path) {
+          const input = form.querySelector(`input[data-pkey="${btn.dataset.for}"]`);
+          input.value = d.path;
+          input.dispatchEvent(new Event('change'));   // 觸發既有的參數更新邏輯
+          recordRecentPath(btn.dataset.mode, d.path);
+          log('已選擇：' + d.path, 'ok');
+        }
+        // 使用者按取消 → 什麼都不做
+      } catch (e) { log('檔案選擇失敗：' + e.message, 'er'); }
+      btn.disabled = false; btn.textContent = '📂 瀏覽';
+    });
+  });
+  form.querySelectorAll('[data-pkey]').forEach(el => {
+    // 即打即存：input 事件就寫回狀態，避免「打完字沒失焦就執行/匯出」漏存
+    let histPushed = false;
+    el.addEventListener('focus', () => { histPushed = false; });
+    el.addEventListener('input', () => {
+      if (!histPushed) { pushHistory(); histPushed = true; }
+      n.params[el.dataset.pkey] = el.type === 'number' ? Number(el.value) : el.value;
+      updateFmIndicator();
+    });
+    el.addEventListener('change', () => {
+      if (!histPushed) { pushHistory(); histPushed = true; }
+      const key = el.dataset.pkey;
+      n.params[key] = el.type === 'number' ? Number(el.value) : el.value;
+      // 輸出檔案節點：檔名帶副檔名時，「檔案類型」自動跳到對應選項（同 Windows 慣例）
+      if (n.type === 'fileout' && key === 'name') {
+        const m = el.value.trim().match(/\.([A-Za-z0-9]+)$/);
+        if (m) {
+          const known = ['md', 'docx', 'xlsx', 'txt', 'csv', 'html', 'json'];
+          n.params.type = known.includes(m[1].toLowerCase()) ? m[1].toLowerCase() : '自訂副檔名';
+          const sel = form.querySelector('select[data-pkey="type"]');
+          if (sel) sel.value = n.params.type;
+        }
+      }
+      // 重畫節點但保留檢查器焦點
+      const focused = document.activeElement;
+      nodeLayer.querySelector(`.node[data-id="${n.id}"]`)?.replaceWith(buildNodeEl(n));
+      renderEdges();
+    });
+  });
+  form.querySelector('[data-act="del"]').addEventListener('click', () => {
+    pushHistory();
+    state.nodes = state.nodes.filter(x => x.id !== n.id);
+    state.edges = state.edges.filter(e => e.from.node !== n.id && e.to.node !== n.id);
+    setSelection(null); renderAll();
+  });
+  form.querySelector('[data-act="dup"]').addEventListener('click', () => duplicateNodes([n.id]));
+}
+
+/* ---------- 節點讀秒器 ----------
+   執行中的節點在標題右側即時顯示已跑多久。
+   只改那顆節點 .st 的文字，不觸發 renderAll（見 INTERACTION_PRINCIPLES 2.7）。 */
+let nodeTimer = null;   // {id, t0, handle}
+function elapsedText(ms) {
+  const s = Math.max(0, ms) / 1000;
+  if (s < 60) return s.toFixed(1) + 's';
+  const m = Math.floor(s / 60);
+  return m + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+}
+function runningText(id) {
+  return (nodeTimer && nodeTimer.id === id)
+    ? '執行中 ' + elapsedText(performance.now() - nodeTimer.t0)
+    : '執行中…';
+}
+function startNodeTimer(id) {
+  stopNodeTimer();
+  nodeTimer = {
+    id, t0: performance.now(),
+    handle: setInterval(() => {
+      const el = nodeLayer.querySelector(`.node[data-id="${id}"] .st`);
+      if (el) el.textContent = runningText(id);
+      else if (!nodeById(id)) stopNodeTimer();   // 節點被刪掉就自己收工
+    }, 100),
+  };
+}
+function stopNodeTimer() {
+  if (nodeTimer) { clearInterval(nodeTimer.handle); nodeTimer = null; }
+}
+
+/* ---------- 用量顯示 ----------
+   usage 形狀：{ in, out, fresh, cacheWrite, cacheRead, costUsd, durationMs, calls }
+   in 已含快取讀寫；節點上只顯示 ↑輸入 ↓輸出＋費用，明細留給右側檢查器。 */
+function fmtTok(n) {
+  n = Number(n) || 0;
+  if (n < 1000) return String(n);
+  if (n < 100000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return Math.round(n / 1000) + 'k';
+}
+function fmtUsd(v) {
+  if (typeof v !== 'number' || !isFinite(v)) return '';
+  return v >= 0.01 ? '$' + v.toFixed(3) : '$' + v.toFixed(4);
+}
+function addUsage(a, b) {
+  if (!b) return a;
+  a = a || { in: 0, out: 0, fresh: 0, cacheWrite: 0, cacheRead: 0, costUsd: 0, durationMs: 0, calls: 0 };
+  for (const k of ['in', 'out', 'fresh', 'cacheWrite', 'cacheRead', 'costUsd', 'durationMs'])
+    a[k] += Number(b[k]) || 0;
+  a.calls += 1;
+  return a;
+}
+function updateUsageTotal(u) {
+  const el = $('#usage-total');
+  if (!u || !u.calls) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.innerHTML = `本次執行　↑<b>${fmtTok(u.in)}</b> ↓<b>${fmtTok(u.out)}</b> tok` +
+    (u.costUsd ? `　<b>${fmtUsd(u.costUsd)}</b>` : '') +
+    `　<span style="opacity:.6">（${u.calls} 次 AI 呼叫）</span>`;
+}
+
+/* ---------- 執行引擎 ---------- */
+const logBody = $('#logbody');
+let logN = 0;
+function log(msg, cls = '', name = '') {
+  logN++;
+  const t = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="t">${t}</span>${name ? `<span class="nm">[${esc(name)}]</span> ` : ''}<span class="${cls}">${esc(msg)}</span>`;
+  logBody.appendChild(d);
+  logBody.scrollTop = logBody.scrollHeight;
+  $('#logcount').textContent = `（${logN} 筆）`;
+}
+
+/* 拓撲排序（引擎與模組子圖共用）：回傳執行順序的節點陣列，有循環回 null */
+function topoOrder(nodes, edges) {
+  const runnable = nodes.filter(n => !NodeTypes[n.type]?.noRun);
+  const ids = new Set(runnable.map(n => n.id));
+  const indeg = {}; runnable.forEach(n => indeg[n.id] = 0);
+  const validEdges = edges.filter(e => ids.has(e.from.node) && ids.has(e.to.node));
+  for (const e of validEdges) indeg[e.to.node]++;
+  const q = runnable.filter(n => indeg[n.id] === 0).map(n => n.id);
+  const order = [];
+  while (q.length) {
+    const id = q.shift(); order.push(id);
+    for (const e of validEdges) if (e.from.node === id && --indeg[e.to.node] === 0) q.push(e.to.node);
+  }
+  if (order.length !== runnable.length) return null; // 有循環
+  return order.map(id => runnable.find(n => n.id === id));
+}
+function topoSort() { return topoOrder(state.nodes, state.edges); }
+
+/* 收集一顆節點的輸入（引擎與模組子圖共用；multi / requireAll 語意見 NODE_PRINCIPLES 三）。
+   mark=true 時在連線上標 _flow/_dead 供畫布顯示；子圖執行不畫線，傳 false。 */
+function collectPortInputs(n, t, edges, emitted, skipped, getNode, mark, failed) {
+  const inputs = {}, sources = {};
+  let deadPort = false, deadByError = false;
+  /* 一條線沒有資料通過，原因有兩種，不能混為一談：
+     ① 上游是「條件分支沒選中」而跳過 ② 上游節點執行失敗。
+     failed 裡放的是後者（含被前一顆失敗連帶擋住的節點），死因才報得對。
+     死因要**逐埠**判定：某個埠上有失敗的線、但那個埠最後仍拿到值（例如合併節點
+     還有另一條活線），就不算是它讓這顆節點停下來的，不能拿去當整顆節點的死因。 */
+  let portErr = false;
+  const killEdge = e => {
+    if (failed && failed.has(e.from.node)) { portErr = true; if (mark) e._deadErr = true; }
+    if (mark) e._dead = true;
+  };
+  for (const pin of t.inputs) {
+    const es = edges.filter(e => e.to.node === n.id && e.to.port === pin.name);
+    if (!es.length) continue;
+    portErr = false;
+    if (pin.multi) {
+      // 多重輸入埠：收集所有活的連線值（依連線順序），並附上來源節點名稱
+      const vals = [], srcs = [];
+      for (const e of es) {
+        const src = emitted[e.from.node];
+        if (!skipped.has(e.from.node) && src && Object.prototype.hasOwnProperty.call(src, e.from.port)) {
+          const sn = getNode(e.from.node);
+          vals.push(src[e.from.port]);
+          srcs.push({ id: sn.id, label: sn.params._label || typeOf(sn).title, value: src[e.from.port] });
+          if (mark) e._flow = true;
+        } else killEdge(e);
+      }
+      inputs[pin.name] = vals;
+      sources[pin.name] = srcs;
+      // requireAll（模板）：任一條連線死掉就跳過，讓條件分支的閘門效果向下傳播
+      // 否則（合併）：全部死掉才跳過
+      if (pin.requireAll ? vals.length < es.length : !vals.length) { deadPort = true; if (portErr) deadByError = true; }
+    } else {
+      let got = false;
+      for (const e of es) {
+        const src = emitted[e.from.node];
+        if (!skipped.has(e.from.node) && src && Object.prototype.hasOwnProperty.call(src, e.from.port)) {
+          inputs[pin.name] = src[e.from.port];
+          if (mark) e._flow = true;
+          got = true; break;
+        } else killEdge(e);
+      }
+      if (!got) { deadPort = true; if (portErr) deadByError = true; }
+    }
+  }
+  return { inputs, sources, deadPort, deadByError };
+}
+
+/* 執行一張子圖（FlowMap 模組的內部）。與 runGraph 共用 topoOrder / collectPortInputs，
+   但不碰畫布：內部進度逐筆寫進執行日誌（帶「▸ 節點名」前綴），AI 用量透過 ctx.meter
+   彙總到外層的模組節點。輸入節點若對應的模組輸入埠有接值則覆蓋，否則用節點自己的預設值；
+   輸出節點只在有跑到時 emit 對應輸出埠（條件分支的閘門效果因此能向外傳播）。
+   任一內部節點出錯 → 整個模組節點視為錯誤。 */
+async function runSubgraph(fm, ctx, visited, depth) {
+  const nodes = fm.graph.nodes, edges = fm.graph.edges;
+  // 巢狀模組的舊存檔相容：wsId（Workspace 時代）→ fmId
+  for (const n of nodes) if (n.type === 'subflow' && n.params?.wsId && !n.params.fmId) n.params.fmId = n.params.wsId;
+  const unknown = nodes.find(n => !NodeTypes[n.type]);
+  if (unknown) throw new Error(`模組內含未知的節點型別「${unknown.type}」，無法執行`);
+  const order = topoOrder(nodes, edges);
+  if (!order) throw new Error('模組內有循環依賴，無法執行');
+  const byId = id => nodes.find(n => n.id === id);
+  const emitted = {}, skipped = new Set();
+  for (const n of order) {
+    if (ctx.signal?.aborted) throw new Error('已中斷');
+    const t = typeOf(n);
+    const name = n.params._label || t.title;
+    const { inputs, sources, deadPort } = collectPortInputs(n, t, edges, emitted, skipped, byId, false, null);
+    if (deadPort) { skipped.add(n.id); ctx.log(`▸ ${name}：跳過（上游分支未選中）`); continue; }
+    // 節點輸入＝模組輸入埠：外面有接值就覆蓋（hasOwnProperty 才算，空字串也是值）
+    if (n.type === 'modin' && Object.prototype.hasOwnProperty.call(ctx.inputs, n.id)) {
+      emitted[n.id] = { out: ctx.inputs[n.id] };
+      continue;
+    }
+    try {
+      const out = await t.run({
+        inputs, sources, params: n.params, node: n,
+        signal: ctx.signal, meter: ctx.meter, settings: ctx.settings ?? state.settings,
+        sessions: ctx.sessions,   // 會話表全執行共用：跨模組邊界也能延續同名會話（例：段 B 接續段 A 的讀碼會話）
+        log: m => ctx.log(`▸ ${name}：${m}`),
+        visited, depth,   // 巢狀模組沿鏈累積，循環偵測才擋得住間接引用
+      });
+      emitted[n.id] = out;
+      const shown = displayVal(out);
+      ctx.log(`▸ ${name}：完成` + (shown ? '：' + clip(shown, 60) : ''));
+    } catch (err) {
+      if (ctx.signal?.aborted) throw err;
+      throw new Error(`內部節點「${name}」錯誤：${err.message || err}`);
+    }
+  }
+  // 節點輸出＝模組輸出埠：只 emit 有值的埠
+  const outs = {};
+  for (const n of nodes) {
+    if (n.type !== 'modout') continue;
+    if (emitted[n.id] && Object.prototype.hasOwnProperty.call(emitted[n.id], '_display'))
+      outs[n.id] = emitted[n.id]._display;
+  }
+  return outs;
+}
+
+async function runGraph() {
+  if (state.running) return;
+  if (!state.nodes.some(n => !typeOf(n).noRun)) { log('畫布是空的，先加些節點吧', 'wr'); return; }
+  const order = topoSort();
+  if (!order) { log('偵測到循環依賴，無法執行。請移除造成迴圈的連線。', 'er'); return; }
+
+  state.running = true;
+  recordRecentPathsFromGraph();   // 手打／匯入的路徑也記進「最近路徑」
+  state.aborter = new AbortController();
+  $('#btn-run').disabled = true; $('#btn-run').textContent = '⏳ 執行中…';
+  $('#btn-abort').disabled = false;
+  $('#btn-reset').disabled = true;
+  setRunState('準備中…', 'run');
+  $('#logpanel').classList.remove('collapsed');
+  state.results = {};
+  state.edges.forEach(e => { delete e._flow; delete e._dead; delete e._deadErr; });
+  renderAll();
+  log(`── 開始執行（${state.simulate ? '模擬模式' : '真實模式'}，共 ${order.length} 個節點）──`);
+
+  const emitted = {};   // nodeId -> output object
+  const skipped = new Set();
+  const failed = new Set();   // 執行失敗的節點，以及被失敗連帶擋住的下游
+  /* 會話表：會話名 → { sessionId, bindKey }。屬於「這一次執行」的執行期狀態：
+     跑完即棄、不序列化、不跨執行（可重複性：每次執行都從乾淨的會話開始）。 */
+  const sessions = Object.create(null);
+  let runUsage = null;  // 本次執行所有 AI 呼叫的總用量
+  updateUsageTotal(null);
+  const t0 = performance.now();
+  let errors = 0;
+
+  for (const [i, n] of order.entries()) {
+    if (state.aborter.signal.aborted) break;
+    setRunState(`執行中 ${i + 1}/${order.length}`, 'run');
+    const t = typeOf(n);
+    const name = n.params._label || t.title;
+    // 收集輸入：每個輸入埠取第一條「活的」連線（邏輯與模組子圖共用，見 collectPortInputs）
+    const { inputs, sources, deadPort, deadByError } =
+      collectPortInputs(n, t, state.edges, emitted, skipped, nodeById, true, failed);
+    if (deadPort) {
+      skipped.add(n.id);
+      if (deadByError) failed.add(n.id);      // 失敗的原因要繼續往下游傳，不能變成「分支未選中」
+      state.results[n.id] = { status: 'skipped', cause: deadByError ? 'error' : 'branch' };
+      log(deadByError ? '未執行（上游節點執行失敗）' : '跳過（上游分支未選中）', deadByError ? 'wr' : '', name);
+      renderAll();
+      continue;
+    }
+
+    state.results[n.id] = { status: 'running' };
+    renderAll();
+    let nodeUsage = null;                       // 這顆節點這次的用量（可能不只一次呼叫）
+    const meter = u => {
+      if (!u || (!u.in && !u.out && !u.costUsd)) return;
+      nodeUsage = addUsage(nodeUsage, u);
+      runUsage = addUsage(runUsage, u);
+      updateUsageTotal(runUsage);
+    };
+    startNodeTimer(n.id);
+    try {
+      const out = await t.run({ inputs, sources, params: n.params, node: n, signal: state.aborter.signal, log: m => log(m, '', name), meter, settings: state.settings, sessions });
+      stopNodeTimer();
+      state.results[n.id] = { status: 'success', output: out, usage: nodeUsage };
+      const shown = displayVal(out);
+      log('完成' + (shown ? '：' + clip(shown, 90) : ''), 'ok', name);
+      emitted[n.id] = out;
+    } catch (err) {
+      stopNodeTimer();
+      if (state.aborter.signal.aborted) {
+        delete state.results[n.id];   // 進行到一半的節點恢復未執行樣式
+        renderAll();
+        break;
+      }
+      errors++;
+      state.results[n.id] = { status: 'error', error: err.message || String(err), usage: nodeUsage };
+      skipped.add(n.id); failed.add(n.id);
+      log('錯誤：' + (err.message || err), 'er', name);
+    }
+    renderAll();
+  }
+
+  stopNodeTimer();
+  const dt = ((performance.now() - t0) / 1000).toFixed(2);
+  if (state.aborter.signal.aborted)
+    log(`── 已中斷（${dt}s，已完成的節點保留結果，其餘未執行）──`, 'wr');
+  else
+    log(`── 執行結束（${dt}s，${errors ? errors + ' 個錯誤' : '全部成功'}）──`, errors ? 'er' : 'ok');
+  if (runUsage?.calls)
+    log(`用量合計：↑${fmtTok(runUsage.in)} ↓${fmtTok(runUsage.out)} tok` +
+        (runUsage.costUsd ? `，${fmtUsd(runUsage.costUsd)}` : '') +
+        `（${runUsage.calls} 次 AI 呼叫）`, 'ok');
+  const wasAborted = state.aborter.signal.aborted;
+  setRunState(wasAborted ? '已中斷' : errors ? `${errors} 個錯誤` : '完成',
+              wasAborted ? 'wr' : errors ? 'er' : 'ok');
+  state.running = false;
+  state.aborter = null;
+  $('#btn-run').disabled = false; $('#btn-run').textContent = '▶ 執行';
+  $('#btn-abort').disabled = true;
+  $('#btn-reset').disabled = false;
+  renderAll();
+}
+
+/* ---------- 自動排版（依拓撲層級） ---------- */
+function autoLayout() {
+  const order = topoSort();
+  if (!order) { log('有循環依賴，無法自動排版', 'wr'); return; }
+  pushHistory();
+  const depth = {};
+  for (const n of order) {
+    depth[n.id] = 0;
+    for (const e of state.edges) if (e.to.node === n.id && depth[e.from.node] !== undefined)
+      depth[n.id] = Math.max(depth[n.id], depth[e.from.node] + 1);
+  }
+  const cols = {};
+  for (const n of order) {
+    const d = depth[n.id];
+    cols[d] = cols[d] || 0;
+    n.x = 40 + d * 270;
+    n.y = 40 + cols[d] * 190;
+    cols[d]++;
+  }
+  // 註解排最上方
+  let nx = 40;
+  for (const n of state.nodes.filter(n => typeOf(n).noRun)) { n.x = nx; n.y = -140; nx += 220; }
+  state.view = { tx: 60, ty: 60, s: 1 };
+  renderAll();
+}
+
+/* ---------- 匯入 / 匯出 ---------- */
+function exportJSON() {
+  const data = JSON.stringify({ version: 1, ...graphData() }, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const fname = (currentFm ? currentFm.name.replace(/[<>:"/\\|?*]/g, '_') : 'workflow-graph') + '.json';
+  a.download = fname;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  log('已匯出 ' + fname, 'ok');
+}
+function importJSON(text) {
+  try {
+    const g = JSON.parse(text);
+    if (!Array.isArray(g.nodes) || !Array.isArray(g.edges)) throw new Error('格式不符');
+    // 舊版相容：codeblock（取程式碼區塊）節點已移除 → 刪節點、把前後連線橋接起來
+    const cbs = g.nodes.filter(x => x.type === 'codeblock');
+    for (const cb of cbs) {
+      const ins = g.edges.filter(e => e.to.node === cb.id);
+      const outs = g.edges.filter(e => e.from.node === cb.id);
+      for (const i of ins) for (const o of outs)
+        g.edges.push({ id: 'n' + Math.random().toString(36).slice(2, 9), from: i.from, to: o.to });
+      g.edges = g.edges.filter(e => e.from.node !== cb.id && e.to.node !== cb.id);
+    }
+    if (cbs.length) g.nodes = g.nodes.filter(x => x.type !== 'codeblock');
+    // 舊版相容：template / merge 以前有 a/b/c 三個輸入埠，遷移到單一 in 埠
+    for (const e of g.edges) {
+      const tn = g.nodes.find(x => x.id === e.to.node);
+      if (tn && (tn.type === 'template' || tn.type === 'merge') && ['a', 'b', 'c'].includes(e.to.port)) e.to.port = 'in';
+    }
+    pushHistory();
+    const clean = loadedGraph(g);             // 洗掉舊檔可能帶進來的執行期暫態
+    state.nodes = clean.nodes; state.edges = clean.edges;
+    setSelection(null); state.results = {}; updateUsageTotal(null);
+    renderAll();
+    log(`已匯入：${g.nodes.length} 個節點、${g.edges.length} 條連線`, 'ok');
+  } catch (e) { log('匯入失敗：' + e.message, 'er'); }
+}
+
+/* ---------- 範例工作流 ---------- */
+function G(nodes, edges) {
+  // 輔助：以簡寫建圖  nodes: [key,type,x,y,params]  edges: ['key.port','key.port']
+  const map = {};
+  const ns = nodes.map(([key, type, x, y, params]) => {
+    const id = uid(); map[key] = id;
+    return { id, type, x, y, params: params || {} };
+  });
+  const es = edges.map(([f, t]) => {
+    const [fn, fp] = f.split('.'), [tn, tp] = t.split('.');
+    return { id: uid(), from: { node: map[fn], port: fp }, to: { node: map[tn], port: tp } };
+  });
+  return { nodes: ns, edges: es };
+}
+
+const Examples = [
+  {
+    name: '① 簡單問答（輸入 → 模板 → LLM → 輸出）',
+    build: () => G([
+      ['q', 'input', 40, 120, { value: '台北為什麼常下雨？', _label: '使用者問題' }],
+      ['tpl', 'template', 310, 120, { template: '請用兩句話回答以下問題，語氣親切：\n\n@使用者問題' }],
+      ['llm', 'llm', 580, 120, { system: '你是簡潔的百科助理。' }],
+      ['out', 'output', 850, 120, { name: '答案' }],
+      ['note', 'note', 40, -60, { text: '最基本的流程：問題套上 Prompt 模板後丟給 LLM。點各節點可在右側改參數。' }],
+    ], [['q.out', 'tpl.in'], ['tpl.out', 'llm.prompt'], ['llm.out', 'out.value']]),
+  },
+  {
+    name: '② 客服分流（LLM 分類 → 條件分支 → 合併）',
+    build: () => G([
+      ['msg', 'input', 30, 200, { value: '我上週買的鍵盤壞了，可以退錢嗎？', _label: '客戶訊息' }],
+      ['cls', 'llm', 290, 200, { system: '你是客服分類器。只回覆一個詞：退款、技術問題、或一般詢問。', _label: 'LLM 分類' }],
+      ['cond', 'condition', 555, 200, { expr: 'String(value).trim() === "退款"' }],
+      ['tpl1', 'template', 810, 40, { template: '客戶要求退款。\n客戶原話：「@客戶訊息」\n請草擬同理且明確的退款流程回覆。', _label: '退款模板' }],
+      ['tpl2', 'template', 810, 400, { template: '客戶問題：「@客戶訊息」\n請草擬一般客服回覆。', _label: '一般模板' }],
+      ['llm1', 'llm', 1070, 40, { system: '你是資深客服。', _label: '退款回覆' }],
+      ['llm2', 'llm', 1070, 400, { system: '你是資深客服。', _label: '一般回覆' }],
+      ['mg', 'merge', 1330, 200, {}],
+      ['out', 'output', 1560, 200, { name: '客服回覆' }],
+      ['note', 'note', 30, -30, { text: '條件節點只讓一條分支通過，未選中的分支整條自動「跳過」。模板節點的單一輸入埠接了兩條線（條件值＋原始訊息），在模板裡用 @客戶訊息 引用。合併節點取有值的那邊。' }],
+    ], [
+      ['msg.out', 'cls.prompt'], ['cls.out', 'cond.value'],
+      ['cond.true', 'tpl1.in'], ['cond.false', 'tpl2.in'],
+      ['msg.out', 'tpl1.in'], ['msg.out', 'tpl2.in'],
+      ['tpl1.out', 'llm1.prompt'], ['tpl2.out', 'llm2.prompt'],
+      ['llm1.out', 'mg.in'], ['llm2.out', 'mg.in'], ['mg.out', 'out.value'],
+    ]),
+  },
+  {
+    name: '③ 並行處理（摘要＋翻譯 → 程式碼合成）',
+    build: () => G([
+      ['doc', 'input', 30, 200, { value: '生成式 AI 正在改變軟體開發：從自動補全到整段函式生成，工程師的角色逐漸從「逐行撰寫」轉向「設計與審查」。', _label: '原文' }],
+      ['sum', 'llm', 300, 40, { system: '把輸入摘要成一句話。', _label: 'LLM 摘要' }],
+      ['tr', 'llm', 300, 380, { system: '把輸入翻譯成英文。', _label: 'LLM 翻譯' }],
+      ['mix', 'code', 570, 200, { code: "return '【摘要】' + a + '\\n【英譯】' + b;", _label: '合成結果' }],
+      ['out', 'output', 840, 200, { name: '報告' }],
+      ['note', 'note', 30, -20, { text: '同一個輸出埠可以接多條線（扇出），兩個 LLM 各自處理後由程式碼節點組合。' }],
+    ], [
+      ['doc.out', 'sum.prompt'], ['doc.out', 'tr.prompt'],
+      ['sum.out', 'mix.a'], ['tr.out', 'mix.b'], ['mix.out', 'out.value'],
+    ]),
+  },
+  {
+    name: '④ 網路研究（查詢 → LLM 摘要）',
+    build: () => G([
+      ['q', 'input', 30, 160, { value: '2026 年 AI Agent 開發框架的最新趨勢', _label: '研究主題' }],
+      ['ws', 'websearch', 300, 160, {}],
+      ['sum', 'llm', 570, 160, { system: '把輸入的搜尋結果整理成 150 字內的繁體中文簡報摘要，保留來源網址。', _label: 'LLM 摘要' }],
+      ['out', 'output', 840, 160, { name: '研究摘要' }],
+      ['note', 'note', 30, -40, { text: '網路查詢節點由本地 Claude 的 WebSearch 工具驅動：真實模式下會實際上網搜尋（約 30 秒～2 分鐘），免 API 金鑰。' }],
+    ], [['q.out', 'ws.query'], ['ws.out', 'sum.prompt'], ['sum.out', 'out.value']]),
+  },
+  {
+    name: '⑤ 檔案報告（讀檔 → LLM 整理 → 依樣板輸出 docx）',
+    build: () => G([
+      ['src', 'filein', 30, 60, { path: 'samples/source.md', _label: '原始資料' }],
+      ['tp', 'filein', 30, 330, { path: 'samples/template.md', _label: '報告樣板' }],
+      ['sum', 'llm', 300, 60, { system: '把輸入的原始資料整理成條理清楚的重點整理，保留所有數據。', _label: 'LLM 整理' }],
+      ['fo', 'fileout', 570, 190, { type: 'docx', name: '週報', _label: '輸出 Word' }],
+      ['out', 'output', 840, 190, { name: '存檔位置' }],
+      ['note', 'note', 300, 350, { text: '「輸出檔案」節點的「參考樣板」埠：接上樣板後，會先讓本地 Claude 把內容依樣板格式重排，再產出 docx / xlsx / md 等檔案。檔案存在伺服器的 outputs/ 資料夾。' }],
+    ], [
+      ['src.out', 'sum.prompt'],
+      ['sum.out', 'fo.content'],
+      ['tp.out', 'fo.ref'],
+      ['fo.out', 'out.value'],
+    ]),
+  },
+  {
+    name: '⑥ 程式碼產生（背景＋需求 → LLM → 取程式碼區塊 → icon.cs）',
+    build: () => G([
+      ['bg', 'input', 30, 40, { value: '這是一個撲克牌遊戲，共 52 張標準撲克牌，加上 Wild 與 Free 兩張特殊牌。', _label: '背景' }],
+      ['req', 'input', 30, 280, { value: '輸出一個 C# enum，名為 Icon，成員涵蓋所有卡片（52 張牌＋Wild＋Free，共 54 個值）。', _label: '需求' }],
+      ['mg', 'merge', 300, 160, { mode: '全部串接', sep: '空一行', headers: '是' }],
+      ['llm', 'llm', 560, 160, { system: '', constraint: '僅程式碼', _label: '產生程式碼' }],
+      ['fo', 'fileout', 820, 160, { name: 'icon.cs', type: '自訂副檔名', folder: '', style: '' }],
+      ['out', 'output', 1080, 160, { name: '存檔位置' }],
+      ['note', 'note', 300, -80, { text: 'LLM 節點的「輸出限制」選了 🔒 僅程式碼：自動注入守則（只輸出程式碼、沒有寫檔能力）＋回覆強制清洗（就算模型多話也只留程式碼區塊）。需求動詞建議用「輸出」而非「創建」。存檔是輸出檔案節點的事。' }],
+    ], [
+      ['bg.out', 'mg.in'], ['req.out', 'mg.in'],
+      ['mg.out', 'llm.prompt'], ['llm.out', 'fo.content'], ['fo.out', 'out.value'],
+    ]),
+  },
+];
+
+/* ---------- FlowMap / Project ----------
+   編輯的對象叫 FlowMap（原名 Workspace）：每張 FlowMap 是一張工作流圖，
+   存為伺服器旁的 flowmaps/<id>.json，並可歸類到 Project（未歸類＝「未分類」）。
+   總覽頁（#overview）是預設畫面：依 Project 分組顯示，左側 outline 點了捲到該區塊。
+   模組共享：同一個 Project（或同為未分類）的 FlowMap **自動互通**、直接可當節點引用；
+   在總覽勾「🌐 公開」的 FlowMap 才能跨 Project 被引用。能見度只影響能不能「新增」引用，
+   既有的模組節點照常執行。 */
+let currentFm = null;     // {id, name, projectId, visibility} — 目前編輯中的 FlowMap
+let fmSavedSnap = '';     // 最後一次載入/儲存時的圖快照，用來判斷未儲存變更
+
+function inOverview() {
+  const el = document.getElementById('overview');
+  return !!el && el.classList.contains('show');
+}
+function fmDirty() { return !!currentFm && snapshot() !== fmSavedSnap; }
+function updateFmIndicator() {
+  const el = document.getElementById('fm-name');
+  if (!el) return;
+  if (!currentFm) { el.innerHTML = ''; el.title = ''; return; }
+  const dirty = fmDirty();
+  el.innerHTML = esc(currentFm.name) +
+    (currentFm.scope ? scopeBadge(currentFm.scope) : '') +
+    (dirty ? '<span class="dirty" title="有未儲存的變更">●</span>' : '');
+  el.title = currentFm.name + (dirty ? '（有未儲存的變更）' : '');
+}
+
+/* 通用對話框。buttons: [{label, value, primary}]；withInput 時 Enter＝主要按鈕。
+   回傳 {value, text}；取消或 Esc 回傳 null。 */
+const modalMask = $('#modal-mask');
+function openModal({ title, sub = '', withInput = false, inputValue = '', placeholder = '', buttons }) {
+  return new Promise(resolve => {
+    $('#modal-title').textContent = title;
+    $('#modal-sub').innerHTML = sub;
+    const input = $('#modal-input');
+    input.style.display = withInput ? '' : 'none';
+    input.value = inputValue; input.placeholder = placeholder;
+    const btnrow = $('#modal-btns');
+    btnrow.innerHTML = '';
+    const close = val => {
+      modalMask.classList.remove('show');
+      document.removeEventListener('keydown', onKey, true);
+      resolve(val === null ? null : { value: val, text: input.value.trim() });
+    };
+    for (const b of buttons) {
+      const bel = document.createElement('button');
+      bel.textContent = b.label;
+      if (b.primary) bel.classList.add('primary');
+      bel.addEventListener('click', () => {
+        if (b.value === 'cancel') return close(null);
+        if (withInput && !input.value.trim()) { input.focus(); return; }
+        close(b.value);
+      });
+      btnrow.appendChild(bel);
+    }
+    const onKey = ev => {
+      if (ev.key === 'Escape') { ev.stopPropagation(); close(null); }
+      else if (ev.key === 'Enter' && withInput) {
+        ev.stopPropagation();
+        const primary = buttons.find(b => b.primary);
+        if (primary && input.value.trim()) close(primary.value);
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    modalMask.classList.add('show');
+    if (withInput) { input.focus(); input.select(); }
+  });
+}
+const ovError = msg => openModal({
+  title: '操作失敗', sub: esc(msg),
+  buttons: [{ label: '知道了', value: 'ok', primary: true }],
+});
+
+/* ---- API 包裝 ---- */
+async function fmApi(pathSuffix, opt) {
+  const res = await fetch('/api/flowmaps' + pathSuffix, opt);
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok || d.error) throw new Error(d.error || ('HTTP ' + res.status));
+  return d;
+}
+async function pjApi(pathSuffix, opt) {
+  const res = await fetch('/api/projects' + pathSuffix, opt);
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok || d.error) throw new Error(d.error || ('HTTP ' + res.status));
+  return d;
+}
+const jsonOpt = (method, body) => ({
+  method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+});
+
+/* ---- FlowMap 模組（同 Project 互通／公開跨 Project） ---- */
+let fmMetas = [];        // 全部 FlowMap 的清單快取（含 projectId / visibility / ports / refs / referencedBy）
+let fmMetasOk = false;   // 這份快取是不是「真的問到了」——問不到時不可以拿它下任何結論
+let pjMetas = [];        // Project 清單快取
+/* 來源已不存在的模組節點 id。這是**畫面狀態不是圖的內容**，所以放在圖外面：
+   放進 params._missing 會被存進檔案，之後就算來源還在也一直標著「已不存在」。 */
+const missingModules = new Set();
+const isModuleMissing = n => missingModules.has(n.id);
+
+async function refreshModules() {
+  try { fmMetas = (await fmApi('')).list; fmMetasOk = true; }
+  catch (e) {
+    // 保留上一次的快取：清單問不到 ≠ 那些 FlowMap 消失了
+    fmMetasOk = false;
+    log('無法取得 FlowMap 清單（' + (e.message || e) + '）——模組節點的狀態維持上一次的結果', 'wr');
+  }
+  renderModulePalette();
+}
+/* fromId 是否（傳遞地）引用了 targetId — 用來排除會造成循環的引用來源 */
+function fmReaches(fromId, targetId, seen = new Set()) {
+  if (fromId === targetId) return true;
+  if (seen.has(fromId)) return false;
+  seen.add(fromId);
+  const m = fmMetas.find(w => w.id === fromId);
+  return !!m && m.refs.some(r => fmReaches(r, targetId, seen));
+}
+/* 目前的 FlowMap 可以引用哪些模組：
+   同一個 Project（或同為未分類）的一律互通，其他 Project 的要是「公開」；
+   一樣排除自己與會造成循環的來源。 */
+function moduleCandidates() {
+  if (!currentFm) return [];
+  const myPj = currentFm.projectId || null;
+  return fmMetas.filter(m => m.id !== currentFm.id
+    && (m.visibility === 'public' || (m.projectId || null) === myPj)
+    && !fmReaches(m.id, currentFm.id));
+}
+/* 開啟 FlowMap 時：模組節點的埠定義與來源同步（名稱、埠增減），
+   指向已消失埠的連線移除並記日誌（不允許無聲行為）。 */
+function syncSubflowPorts() {
+  // 圖換過了：集合裡不留現在這張圖沒有的節點 id
+  const alive = new Set(state.nodes.map(x => x.id));
+  for (const id of missingModules) if (!alive.has(id)) missingModules.delete(id);
+  if (!fmMetasOk) return;      // 清單沒問到就什麼都不改，別把「查不到」說成「來源不存在」
+  for (const n of state.nodes) {
+    if (n.type !== 'subflow') continue;
+    const meta = fmMetas.find(m => m.id === n.params.fmId);
+    if (!meta) {
+      if (!missingModules.has(n.id)) {
+        missingModules.add(n.id);
+        log(`模組節點「${n.params._fmName || n.params.fmId}」的來源 FlowMap 已不存在，執行會失敗`, 'wr');
+      }
+      continue;
+    }
+    missingModules.delete(n.id);
+    n.params._fmName = meta.name;
+    const validIn = new Set(meta.ports.inputs.map(p => p.name));
+    const validOut = new Set(meta.ports.outputs.map(p => p.name));
+    const oldPorts = n.params._ports || { inputs: [], outputs: [] };
+    const labelOf = (list, name) => list.find(p => p.name === name)?.label || name;
+    const dropped = [];
+    state.edges = state.edges.filter(e => {
+      if (e.to.node === n.id && !validIn.has(e.to.port)) { dropped.push('輸入埠「' + labelOf(oldPorts.inputs, e.to.port) + '」'); return false; }
+      if (e.from.node === n.id && !validOut.has(e.from.port)) { dropped.push('輸出埠「' + labelOf(oldPorts.outputs, e.from.port) + '」'); return false; }
+      return true;
+    });
+    n.params._ports = JSON.parse(JSON.stringify(meta.ports));
+    if (dropped.length)
+      log(`模組「${meta.name}」的介面已變更：移除了 ${dropped.length} 條連線（${dropped.join('、')} 已不存在）`, 'wr');
+  }
+}
+/* 切換能見度：'public'＝跨 Project 可引用；'project'＝只在同 Project 互通（預設）。
+   取消公開時若有別的 Project 正在引用會先警告（既有引用不受影響，只是不能再新增）。 */
+async function setVisibility(fm, next) {
+  if (next !== 'public') {
+    const meta = fmMetas.find(m => m.id === fm.id) || fm;
+    const cross = (meta.referencedBy || []).filter(r => (r.projectId || null) !== (fm.projectId || null));
+    if (cross.length) {
+      const names = cross.map(w => '「' + esc(w.name) + '」').join('、');
+      const r = await openModal({
+        title: '取消公開',
+        sub: `有 ${cross.length} 個其他 Project 的 FlowMap 正在引用它：${names}。<br>` +
+             `既有的模組節點會繼續運作，但那些 Project 之後無法再新增引用。確定取消公開嗎？`,
+        buttons: [{ label: '取消', value: 'cancel' }, { label: '取消公開', value: 'ok', primary: true }],
+      });
+      if (!r) return false;
+    }
+  }
+  try {
+    await fmApi('/' + fm.id, jsonOpt('PUT', { visibility: next }));
+    await refreshModules();
+    return true;
+  } catch (e) { ovError('切換能見度失敗：' + e.message); return false; }
+}
+
+/* ---- 總覽頁（Project 分組＋outline） ---- */
+/* Local／Remote：scope 由檔案放在 flowmaps/local/ 還是 flowmaps/remote/ 決定（後端說了算），
+   前端只負責顯示與請求切換。Project 有 scope，成員一律跟著 Project；未分類的 FlowMap
+   自己帶 scope（新建預設 local）。 */
+const SCOPE_LABEL = { local: '🔒 本機', remote: '☁ 版控' };
+const SCOPE_LONG = { local: '🔒 本機（不進版控）', remote: '☁ 版控（進版控）' };
+const SCOPE_TIP = {
+  local: '本機：檔案在 flowmaps/local/，已被 .gitignore 忽略，不會進版控',
+  remote: '版控：檔案在 flowmaps/remote/，會被 git 追蹤，commit 時一起進版控',
+};
+const scopeOf = sc => (sc === 'remote' ? 'remote' : 'local');
+/* act 有給就是「可點的切換鈕」（點一下換 Local／Remote）；沒給就是純顯示 */
+const scopeBadge = (sc, act) => {
+  const k = scopeOf(sc);
+  const tip = act
+    ? `${SCOPE_TIP[k]}\n點一下改成${k === 'remote' ? '本機（不進版控）' : '版控（進版控）'}`
+    : SCOPE_TIP[k];
+  return `<span class="fm-badge scope-${k}"${act ? ` data-act="${act}"` : ''} title="${tip}">${SCOPE_LABEL[k]}</span>`;
+};
+/* 一句話講完：搬去哪、版控怎麼算。已經進過版控的檔案由後端直接在 git 標記（staged），
+   使用者不必自己補一刀刪除，所以這裡不再嘮叨。 */
+const scopeMoveSub = (whatHtml, next) =>
+  `${whatHtml}會搬到 <code>flowmaps/${next}/</code>，` +
+  (next === 'remote' ? '之後進版控。' : '之後不進版控（git 會自動標記這次移除）。');
+/* 總覽頁的短提示，3 秒後自己淡出 */
+let ovToastTimer = null;
+function ovToast(html) {
+  const el = $('#ov-toast');
+  el.innerHTML = html;
+  el.classList.add('show');
+  clearTimeout(ovToastTimer);
+  ovToastTimer = setTimeout(() => el.classList.remove('show'), 3400);
+}
+/* 「已搬到…（git 標記 N 筆）」的統一說法 */
+const scopeDoneMsg = (whatHtml, next, git) =>
+  `${whatHtml}已搬到 flowmaps/${next}/` +
+  (git?.staged ? `，git 已標記 ${git.staged} 筆變更（staged，待你 commit）` : '');
+
+const secId = pjId => 'pj-sec-' + (pjId || 'none');
+/* 區塊內的顯示順序：🌐 公開的固定排最前，其餘在後；
+   各自依手動排序值（order，拖曳時寫入；沒排過的用建立時間代位）由小到大。 */
+const orderKey = m => Number.isFinite(m.order) ? m.order : (Date.parse(m.createdAt) || 0);
+/* 未分類區塊要收容「沒有 projectId」與「projectId 指到已不存在的 Project」兩種——
+   後者若不收容就不屬於任何區塊，等於在 UI 上整個消失（開不了、改不了、刪不了）。 */
+const homeProject = m => (m.projectId && pjMetas.some(p => p.id === m.projectId)) ? m.projectId : null;
+const sectionMembers = pjId => fmMetas
+  .filter(m => homeProject(m) === (pjId || null))
+  .sort((a, b) =>
+    ((b.visibility === 'public') - (a.visibility === 'public')) || (orderKey(a) - orderKey(b)));
+
+/* ---- 卡片拖曳：同區塊換位置、跨區塊換 Project ---- */
+let dragFmId = null;
+function clearDropMarks() {
+  document.querySelectorAll('.fm-card.drop-before,.fm-card.drop-after').forEach(el =>
+    el.classList.remove('drop-before', 'drop-after'));
+  document.querySelectorAll('.pj-grid.drop-target').forEach(el => el.classList.remove('drop-target'));
+}
+/* 放開時：算出新的 order（同能見度群組內取鄰居中點；公開群固定在前，拖不進另一群），
+   跨區塊時一併改 projectId。一次 PUT，成功後重畫總覽。 */
+async function dropFmCard(srcId, targetPjId, targetId, before) {
+  const src = fmMetas.find(m => m.id === srcId);
+  if (!src) return;
+  const srcPub = src.visibility === 'public';
+  const group = sectionMembers(targetPjId)
+    .filter(m => m.id !== srcId && (m.visibility === 'public') === srcPub);
+  let idx = group.length;                                 // 預設插到群組最後
+  if (targetId) {
+    const ti = group.findIndex(m => m.id === targetId);
+    if (ti >= 0) idx = before ? ti : ti + 1;
+    else {
+      // 目標卡在另一個能見度群組（公開群在前、私有群在後）→ 靠向自己群組相鄰的那端
+      const t = fmMetas.find(m => m.id === targetId);
+      idx = (t && t.visibility === 'public' && !srcPub) ? 0 : group.length;
+    }
+  }
+  const prev = group[idx - 1], next = group[idx];
+  let order;
+  if (prev && next) order = (orderKey(prev) + orderKey(next)) / 2;
+  else if (prev) order = orderKey(prev) + 1000;
+  else if (next) order = orderKey(next) - 1000;
+  else order = Date.now();
+  const samePj = (src.projectId || null) === (targetPjId || null);
+  /* 拖進另一個 Project 可能連帶換 scope（進版控／退出版控）——這是使用者看不見的後果，要問過。
+     拖到「未分類」不改 scope（未分類兩種都收）。 */
+  const targetPj = targetPjId ? pjMetas.find(p => p.id === targetPjId) : null;
+  const targetScope = targetPj ? scopeOf(targetPj.scope) : scopeOf(src.scope);
+  if (targetScope !== scopeOf(src.scope)) {
+    const r = await openModal({
+      title: '這會跨 Local／Remote',
+      sub: `「${esc(src.name)}」現在是 ${SCOPE_LONG[scopeOf(src.scope)]}，` +
+           `Project「${esc(targetPj.name)}」是 ${SCOPE_LONG[targetScope]}。<br>` +
+           scopeMoveSub('移過去之後它', targetScope),
+      buttons: [{ label: '取消', value: 'cancel' }, { label: '移過去', value: 'ok', primary: true }],
+    });
+    if (!r) { loadOverview(); return; }
+  }
+  try {
+    const r2 = await fmApi('/' + srcId, jsonOpt('PUT', samePj ? { order } : { order, projectId: targetPjId }));
+    loadOverview();
+    if (targetScope !== scopeOf(src.scope)) ovToast(scopeDoneMsg(`「${esc(src.name)}」`, targetScope, r2.git));
+  } catch (e) { ovError('移動失敗：' + e.message); }
+}
+const pjNameOf = id => id ? (pjMetas.find(p => p.id === id)?.name || '（不明 Project）') : '未分類';
+
+async function loadOverview() {
+  const main = $('#ov-main'), outline = $('#ov-outline');
+  try {
+    const [fmRes, pjRes] = await Promise.all([fmApi(''), pjApi('')]);
+    fmMetas = fmRes.list; fmMetasOk = true; pjMetas = pjRes.list;
+  } catch (e) {
+    outline.innerHTML = '';
+    main.innerHTML = `<div class="pj-emptyhint">無法載入清單：${esc(e.message)}</div>`;
+    return;
+  }
+  // 分組：各 Project（依建立順序）＋最後一段「未分類」
+  const groups = [...pjMetas.map(p => ({ id: p.id, name: p.name, scope: scopeOf(p.scope), isProject: true })),
+                  { id: null, name: '未分類', isProject: false }];
+  outline.innerHTML = '<h4>Projects</h4>';
+  main.innerHTML = '';
+  for (const g of groups) {
+    const members = sectionMembers(g.id);
+    // 左側 outline（錨點快捷）
+    const oi = document.createElement('div');
+    oi.className = 'ov-oitem';
+    oi.innerHTML = `${g.isProject ? (g.scope === 'remote' ? '☁' : '🔒') : '📄'} ${esc(g.name)}` +
+      `<span class="cnt">${members.length}</span>`;
+    oi.title = g.name;
+    oi.addEventListener('click', () =>
+      document.getElementById(secId(g.id))?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    outline.appendChild(oi);
+    // 右側區塊
+    const sec = document.createElement('section');
+    sec.className = 'pj-section'; sec.id = secId(g.id);
+    const head = document.createElement('div');
+    head.className = 'pj-head';
+    head.innerHTML =
+      `<h2>${g.isProject ? '📁' : '📄'} ${esc(g.name)}${g.isProject ? scopeBadge(g.scope, 'pjscope') : ''}</h2>` +
+      `<span class="pj-count">${members.length} 個 FlowMap</span><span style="flex:1"></span>` +
+      `<button data-act="newfm" title="在這裡建立新的 FlowMap">＋ FlowMap</button>` +
+      (g.isProject
+        ? `<button data-act="pjrename" title="重新命名 Project">✎ 命名</button>` +
+          `<button data-act="pjdel" title="刪除 Project（FlowMap 可選擇移到未分類或一併刪除）">🗑 刪除 Project</button>`
+        : '');
+    head.addEventListener('click', ev => {
+      const act = ev.target.closest('[data-act]')?.dataset.act;   // 徽章也是可點的（切 scope）
+      if (act === 'newfm') fmCreateFlow(g.id);
+      else if (act === 'pjscope') pjSetScopeFlow(g);
+      else if (act === 'pjrename') pjRenameFlow(g);
+      else if (act === 'pjdel') pjDeleteFlow(g);
+    });
+    sec.appendChild(head);
+    const grid = document.createElement('div');
+    grid.className = 'pj-grid';
+    grid.addEventListener('dragover', ev => {
+      if (!dragFmId) return;
+      ev.preventDefault(); ev.dataTransfer.dropEffect = 'move';
+      grid.classList.add('drop-target');
+    });
+    grid.addEventListener('dragleave', ev => {
+      if (ev.target === grid) grid.classList.remove('drop-target');
+    });
+    grid.addEventListener('drop', ev => {
+      if (!dragFmId) return;
+      ev.preventDefault();
+      clearDropMarks();
+      dropFmCard(dragFmId, g.id, null, false);   // 丟在區塊空白處 → 排到最後
+    });
+    if (!members.length) {
+      grid.innerHTML = `<div class="pj-emptyhint">${g.isProject ? '這個 Project 還沒有 FlowMap。' : '沒有未分類的 FlowMap。'}按上方「＋ FlowMap」建立。</div>`;
+    }
+    for (const fm of members) grid.appendChild(buildFmCard(fm));
+    sec.appendChild(grid);
+    main.appendChild(sec);
+  }
+}
+function buildFmCard(fm) {
+  const card = document.createElement('div');
+  card.className = 'fm-card';
+  card.draggable = true;
+  card.title = '拖曳可換位置，拖到別的區塊＝換 Project';
+  const pub = fm.visibility === 'public';
+  const sc = scopeOf(fm.scope);
+  const loose = homeProject(fm) === null;   // 未分類：scope 是它自己的事，可以單獨切
+  card.innerHTML =
+    `<div class="fm-title">${esc(fm.name)}${pub ? '<span class="fm-badge" title="公開：所有 Project 都能當節點引用">🌐 公開</span>' : ''}` +
+      `${loose ? scopeBadge(sc, 'scope') : ''}</div>` +
+    `<div class="fm-acts">` +
+      `<button data-act="vis" title="${pub ? '取消公開（回到只在同 Project 互通）' : '設為公開（所有 Project 都能當節點引用；同 Project 本來就互通）'}">${pub ? '↩ 取消公開' : '🌐 公開'}</button>` +
+      `<button data-act="rename" title="重新命名">✎ 命名</button>` +
+      `<button data-act="dup" title="複製一份（留在同一個 Project，不會自動公開）">⧉ 複製</button>` +
+      `<button data-act="del" title="刪除這個 FlowMap">🗑 刪除</button>` +
+    `</div>`;
+  card.addEventListener('click', async ev => {
+    const act = ev.target.closest('[data-act]')?.dataset.act;   // 徽章也是可點的（切 scope）
+    if (act === 'scope') return fmSetScopeFlow(fm);
+    if (act === 'vis') { if (await setVisibility(fm, pub ? 'project' : 'public')) loadOverview(); return; }
+    if (act === 'rename') return fmRenameFlow(fm);
+    if (act === 'dup') return fmDuplicateFlow(fm);
+    if (act === 'del') return fmDeleteFlow(fm);
+    openFlowMap(fm.id);
+  });
+  // 拖曳：同區塊換位置、跨區塊換 Project（左半＝插到目標前、右半＝插到目標後）
+  card.addEventListener('dragstart', ev => {
+    dragFmId = fm.id;
+    ev.dataTransfer.setData('text/fm-card', fm.id);
+    ev.dataTransfer.effectAllowed = 'move';
+    card.classList.add('dragging');
+  });
+  card.addEventListener('dragend', () => {
+    dragFmId = null;
+    card.classList.remove('dragging');
+    clearDropMarks();
+  });
+  card.addEventListener('dragover', ev => {
+    if (!dragFmId || dragFmId === fm.id) return;
+    ev.preventDefault(); ev.stopPropagation();
+    ev.dataTransfer.dropEffect = 'move';
+    const r = card.getBoundingClientRect();
+    const before = ev.clientX < r.left + r.width / 2;
+    card.classList.toggle('drop-before', before);
+    card.classList.toggle('drop-after', !before);
+  });
+  card.addEventListener('dragleave', () => card.classList.remove('drop-before', 'drop-after'));
+  card.addEventListener('drop', ev => {
+    if (!dragFmId || dragFmId === fm.id) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const before = card.classList.contains('drop-before');
+    clearDropMarks();
+    dropFmCard(dragFmId, fm.projectId || null, fm.id, before);
+  });
+  return card;
+}
+function showOverview() {
+  closeMenus();
+  document.getElementById('overview').classList.add('show');
+  loadOverview();
+}
+function showEditor() { document.getElementById('overview').classList.remove('show'); }
+
+/* ---- 開啟 / 儲存 / 返回 ---- */
+async function openFlowMap(id) {
+  try {
+    const fm = await fmApi('/' + id);
+    currentFm = { id: fm.id, name: fm.name, projectId: fm.projectId || null, visibility: fm.visibility, scope: fm.scope };
+    const g = loadedGraph(fm.graph);          // 洗掉舊存檔可能帶進來的執行期暫態、遷移舊欄位
+    state.nodes = g.nodes; state.edges = g.edges;
+    state.history = []; state.future = [];
+    setSelection(null); state.results = {}; updateUsageTotal(null);
+    setRunState('待機', '');   // 不然狀態字會停在上一張 FlowMap 的「完成／N 個錯誤」
+    state.view = fm.view || { tx: 60, ty: 40, s: 1 };
+    showEditor();
+    log(`已開啟 FlowMap：${fm.name}（${pjNameOf(currentFm.projectId)}，${state.nodes.length} 個節點、${state.edges.length} 條連線）`, 'ok');
+    await refreshModules();       // 更新左側模組區＋供埠同步查來源
+    syncSubflowPorts();           // 模組節點的埠與來源對齊（同步不算未儲存變更）
+    fmSavedSnap = snapshot();
+    renderAll();
+  } catch (e) { ovError('開啟 FlowMap 失敗：' + e.message); }
+}
+async function saveFlowMap() {
+  if (!currentFm) return false;
+  try {
+    // 路徑類參數不進本體：拆成 localPaths 存本機側車（見 splitLocalPaths 的說明）
+    const { graph, localPaths } = splitLocalPaths({ version: 1, ...graphData() });
+    const fm = await fmApi('/' + currentFm.id, jsonOpt('PUT', {
+      graph,
+      view: state.view,
+      localPaths,
+    }));
+    fmSavedSnap = snapshot();
+    updateFmIndicator();
+    log(`已儲存 FlowMap：${fm.name}`, 'ok');
+    return true;
+  } catch (e) { log('儲存失敗：' + e.message, 'er'); return false; }
+}
+async function backToOverview() {
+  if (state.running) { log('執行中，請先 ⏹ 中斷或等執行結束，再返回總覽', 'wr'); return; }
+  if (fmDirty()) {
+    const r = await openModal({
+      title: '有未儲存的變更',
+      sub: `FlowMap「${esc(currentFm.name)}」的變更尚未儲存。`,
+      buttons: [
+        { label: '取消', value: 'cancel' },
+        { label: '放棄變更', value: 'discard' },
+        { label: '儲存後離開', value: 'save', primary: true },
+      ],
+    });
+    if (!r) return;
+    if (r.value === 'save' && !(await saveFlowMap())) return;
+  }
+  currentFm = null; fmSavedSnap = '';
+  updateFmIndicator();
+  showOverview();
+}
+
+/* ---- FlowMap：新增 / 重新命名 / 複製 / 公開切換 / 刪除（換 Project 走卡片拖曳）---- */
+async function fmCreateFlow(projectId) {
+  /* 有 Project 就跟著 Project 的 scope（不給選，避免成員跟分類分家）；未分類才問要放哪邊 */
+  const pj = projectId ? pjMetas.find(p => p.id === projectId) : null;
+  const r = await openModal({
+    title: `新增 FlowMap（${esc(pjNameOf(projectId || null))}${pj ? '・' + SCOPE_LABEL[scopeOf(pj.scope)] : ''}）`,
+    sub: pj
+      ? `為新的工作流取個名字。它會跟著 Project 放在 <code>flowmaps/${scopeOf(pj.scope)}/</code>。`
+      : '為新的工作流取個名字，並選擇要不要進版控。',
+    withInput: true, placeholder: '例如：客服分流',
+    buttons: pj
+      ? [{ label: '取消', value: 'cancel' }, { label: '建立', value: 'ok', primary: true }]
+      : [{ label: '取消', value: 'cancel' },
+         { label: '建立（☁ 版控）', value: 'remote' },
+         { label: '建立（🔒 本機）', value: 'local', primary: true }],
+  });
+  if (!r) return;
+  try {
+    const fm = await fmApi('', jsonOpt('POST', {
+      name: r.text, projectId: projectId || undefined,
+      scope: pj ? undefined : r.value,      // 有 Project 時由後端依 Project 決定
+    }));
+    openFlowMap(fm.id);
+  } catch (e) { ovError('建立 FlowMap 失敗：' + e.message); }
+}
+/* 單獨切換一個「未分類」FlowMap 的 Local／Remote（有 Project 的請切整個 Project） */
+async function fmSetScopeFlow(fm) {
+  const next = scopeOf(fm.scope) === 'remote' ? 'local' : 'remote';
+  const r = await openModal({
+    title: next === 'remote' ? '改成 ☁ 版控 (Remote)' : '改成 🔒 本機 (Local)',
+    sub: scopeMoveSub(`FlowMap「${esc(fm.name)}」`, next),
+    buttons: [{ label: '取消', value: 'cancel' }, { label: '確定切換', value: 'ok', primary: true }],
+  });
+  if (!r) return;
+  try {
+    await washLocalPaths(fm.id);                // 先洗，再切——不然本體裡的絕對路徑會跟著進版控
+    const r2 = await fmApi('/' + fm.id, jsonOpt('PUT', { scope: next }));
+    loadOverview();
+    ovToast(scopeDoneMsg(`「${esc(fm.name)}」`, next, r2.git));
+  } catch (e) { ovError('切換失敗：' + e.message); }
+}
+async function fmRenameFlow(fm) {
+  const r = await openModal({
+    title: '重新命名 FlowMap', withInput: true, inputValue: fm.name,
+    buttons: [{ label: '取消', value: 'cancel' }, { label: '改名', value: 'ok', primary: true }],
+  });
+  if (!r || r.text === fm.name) return;
+  try { await fmApi('/' + fm.id, jsonOpt('PUT', { name: r.text })); loadOverview(); }
+  catch (e) { ovError('重新命名失敗：' + e.message); }
+}
+async function fmDuplicateFlow(fm) {
+  // guardApi 要求 POST 一律帶 application/json，所以就算沒有 body 也走 jsonOpt
+  try { await fmApi('/' + fm.id + '/duplicate', jsonOpt('POST', {})); loadOverview(); }
+  catch (e) { ovError('複製失敗：' + e.message); }
+}
+async function fmDeleteFlow(fm) {
+  const refWarn = fm.referencedBy?.length
+    ? `<br><b style="color:var(--red)">⚠ 有 ${fm.referencedBy.length} 個 FlowMap 正在把它當作模組引用：` +
+      `${fm.referencedBy.map(w => '「' + esc(w.name) + '」').join('、')}。刪除後那些模組節點會執行失敗。</b>`
+    : '';
+  const r = await openModal({
+    title: '刪除 FlowMap',
+    sub: `確定要刪除「${esc(fm.name)}」嗎？<br>內含 ${fm.nodeCount} 個節點、${fm.edgeCount} 條連線，刪除後無法復原。${refWarn}`,
+    buttons: [{ label: '取消', value: 'cancel' }, { label: '刪除', value: 'ok', primary: true }],
+  });
+  if (!r) return;
+  try { await fmApi('/' + fm.id, { method: 'DELETE' }); loadOverview(); }
+  catch (e) { ovError('刪除失敗：' + e.message); }
+}
+
+/* ---- Project：新增 / 重新命名 / 刪除 ---- */
+async function pjCreateFlow() {
+  const r = await openModal({
+    title: '新增 Project',
+    sub: 'Project 用來把 FlowMap 分類；同一個 Project 裡的 FlowMap 可以直接互相當節點引用。<br><br>' +
+         '<b>🔒 本機</b>＝存在 <code>flowmaps/local/</code>，不進版控（預設）；' +
+         '<b>☁ 版控</b>＝存在 <code>flowmaps/remote/</code>，會跟著 git 走。之後隨時可以切換。',
+    withInput: true, placeholder: '例如：客服自動化',
+    buttons: [{ label: '取消', value: 'cancel' },
+              { label: '建立（☁ 版控）', value: 'remote' },
+              { label: '建立（🔒 本機）', value: 'local', primary: true }],
+  });
+  if (!r) return;
+  try { await pjApi('', jsonOpt('POST', { name: r.text, scope: r.value })); loadOverview(); }
+  catch (e) { ovError('建立 Project 失敗：' + e.message); }
+}
+/* 切換整個 Project 的 Local／Remote：成員 FlowMap 的檔案會一起搬
+   （中途失敗由後端把已搬的退回原位；退不回來的會在錯誤訊息中指名） */
+async function pjSetScopeFlow(pj) {
+  const cur = scopeOf(pj.scope), next = cur === 'remote' ? 'local' : 'remote';
+  const members = fmMetas.filter(m => m.projectId === pj.id);
+  const r = await openModal({
+    title: next === 'remote' ? '改成 ☁ 版控 (Remote)' : '改成 🔒 本機 (Local)',
+    sub: scopeMoveSub(`Project「${esc(pj.name)}」與裡面的 ${members.length} 個 FlowMap `, next),
+    buttons: [{ label: '取消', value: 'cancel' }, { label: '確定切換', value: 'ok', primary: true }],
+  });
+  if (!r) return;
+  try {
+    for (const m of members) await washLocalPaths(m.id);   // 每個成員都先洗，再整批切
+    const r2 = await pjApi('/' + pj.id, jsonOpt('PUT', { scope: next }));
+    loadOverview();
+    ovToast(scopeDoneMsg(`Project「${esc(pj.name)}」與 ${r2.moved} 個 FlowMap `, next, r2.git));
+  } catch (e) { ovError('切換失敗：' + e.message); }
+}
+async function pjRenameFlow(pj) {
+  const r = await openModal({
+    title: '重新命名 Project', withInput: true, inputValue: pj.name,
+    buttons: [{ label: '取消', value: 'cancel' }, { label: '改名', value: 'ok', primary: true }],
+  });
+  if (!r || r.text === pj.name) return;
+  try { await pjApi('/' + pj.id, jsonOpt('PUT', { name: r.text })); loadOverview(); }
+  catch (e) { ovError('重新命名失敗：' + e.message); }
+}
+async function pjDeleteFlow(pj) {
+  const members = fmMetas.filter(m => m.projectId === pj.id);
+  // 連同刪除時，若有成員被「外面」引用要標紅警告
+  const memberIds = new Set(members.map(m => m.id));
+  const extRefs = members.filter(m => (m.referencedBy || []).some(r => !memberIds.has(r.id)));
+  const purgeWarn = extRefs.length
+    ? `<br><b style="color:var(--red)">⚠ 其中 ${extRefs.length} 個（${extRefs.map(m => '「' + esc(m.name) + '」').join('、')}）` +
+      `正被這個 Project 以外的 FlowMap 當作模組引用，「連同刪除」會讓那些模組節點執行失敗。</b>`
+    : '';
+  const r = await openModal({
+    title: '刪除 Project',
+    sub: `確定要刪除 Project「${esc(pj.name)}」嗎？裡面有 ${members.length} 個 FlowMap。<br>` +
+         `「移到未分類」只刪分類、保留全部 FlowMap；「連同刪除」會把裡面的 FlowMap 一併刪掉（無法復原）。${purgeWarn}`,
+    buttons: [
+      { label: '取消', value: 'cancel' },
+      { label: '連同刪除', value: 'purge' },
+      { label: '移到未分類', value: 'keep', primary: true },
+    ],
+  });
+  if (!r) return;
+  try {
+    await pjApi('/' + pj.id + '?mode=' + r.value, { method: 'DELETE' });
+    loadOverview();
+  } catch (e) { ovError('刪除 Project 失敗：' + e.message); }
+}
+
+$('#btn-back').addEventListener('click', backToOverview);
+$('#btn-save').addEventListener('click', saveFlowMap);
+$('#btn-pj-new').addEventListener('click', pjCreateFlow);
+/* Ctrl+S 儲存：在檢查器輸入框打字時也有效（此監聽不排除 input/textarea） */
+window.addEventListener('keydown', ev => {
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') {
+    ev.preventDefault();
+    if (!inOverview() && currentFm) saveFlowMap();
+  }
+});
+/* 關閉分頁 / 重新整理前的未儲存防呆 */
+window.addEventListener('beforeunload', ev => {
+  if (fmDirty()) { ev.preventDefault(); ev.returnValue = ''; }
+});
+
+/* ---------- 工具列 ---------- */
+$('#btn-run').addEventListener('click', runGraph);
+$('#btn-abort').addEventListener('click', () => {
+  if (state.running && state.aborter) {
+    $('#btn-abort').disabled = true;
+    log('中斷要求已送出，正在停止…', 'wr');
+    state.aborter.abort();
+  }
+});
+$('#btn-reset').addEventListener('click', () => {
+  state.results = {};
+  updateUsageTotal(null);
+  state.edges.forEach(e => { delete e._flow; delete e._dead; delete e._deadErr; });
+  renderAll();
+  $('#btn-reset').disabled = true;
+  setRunState('待機', '');
+  log('已重製：所有節點恢復執行前的樣式', 'ok');
+});
+$('#btn-layout').addEventListener('click', autoLayout);
+$('#btn-undo').addEventListener('click', undo);
+$('#btn-redo').addEventListener('click', redo);
+$('#btn-clear').addEventListener('click', () => {
+  if (!state.nodes.length) return;
+  pushHistory();
+  state.nodes = []; state.edges = []; state.results = {}; setSelection(null);
+  renderAll();
+});
+$('#btn-export').addEventListener('click', exportJSON);
+$('#btn-import').addEventListener('click', () => $('#file-import').click());
+$('#file-import').addEventListener('change', ev => {
+  const f = ev.target.files[0];
+  if (f) f.text().then(importJSON);
+  ev.target.value = '';
+});
+
+/* 模擬模式切換 */
+/* 預設模型：存在瀏覽器本機（是使用者偏好，不是圖的內容——放進圖會害存檔被判定成有變更） */
+const selModel = $('#sel-model');
+const MODEL_KEY = 'wfg.defaultModel';
+try { state.settings.model = localStorage.getItem(MODEL_KEY) || ''; } catch {}
+selModel.value = state.settings.model;
+selModel.addEventListener('change', () => {
+  state.settings.model = selModel.value;
+  try { localStorage.setItem(MODEL_KEY, state.settings.model); } catch {}
+  log(state.settings.model
+    ? `預設模型改為 ${state.settings.model}（節點自己選了模型的不受影響）`
+    : '預設模型改為「跟隨 Claude Code」（不指定模型）', 'wr');
+  renderAll();          // 節點卡片與檢查器上的「預設（xxx）」要跟著更新
+});
+
+/* Shell 總開關。刻意不寫進 localStorage：這是危險能力，每次開頁都應該從關閉開始 */
+const tgShell = $('#tg-shell'), cbShell = $('#cb-shell');
+tgShell.addEventListener('click', ev => {
+  if (ev.target !== cbShell) cbShell.checked = !cbShell.checked;
+  state.allowShell = cbShell.checked;
+  tgShell.classList.toggle('armed', state.allowShell);
+  log(state.allowShell
+    ? '已允許 Shell 指令節點在這台機器上執行指令。每段新指令第一次跑仍會跳確認；重新整理後會回到關閉'
+    : '已停止允許 Shell 指令節點執行（節點會直接報錯，不會執行）', 'wr');
+  renderAll();          // 節點卡片上的「⚠ 未開啟」提示要跟著更新
+});
+
+const tgSim = $('#tg-sim'), cbSim = $('#cb-sim');
+tgSim.addEventListener('click', ev => {
+  if (ev.target !== cbSim) cbSim.checked = !cbSim.checked;
+  state.simulate = cbSim.checked;
+  tgSim.classList.toggle('on', state.simulate);
+  log(state.simulate ? '已切換到模擬模式（不呼叫本地 Claude）' : '已切換到真實模式（LLM 節點將呼叫本地 Claude）', 'wr');
+});
+
+/* 範例選單 */
+const exMenu = $('#examples-menu');
+Examples.forEach((ex, i) => {
+  const b = document.createElement('button');
+  b.textContent = ex.name;
+  b.addEventListener('click', () => {
+    exMenu.classList.remove('show');
+    pushHistory();
+    const g = ex.build();
+    state.nodes = g.nodes; state.edges = g.edges;
+    setSelection(null); state.results = {}; updateUsageTotal(null);
+    renderAll();
+    state.view = { tx: 40, ty: 100, s: state.nodes.length > 7 ? 0.72 : 0.95 };
+    applyView();
+    log('已載入範例：' + ex.name, 'ok');
+  });
+  exMenu.appendChild(b);
+});
+$('#btn-examples').addEventListener('click', ev => {
+  const r = ev.currentTarget.getBoundingClientRect();
+  exMenu.style.left = r.left + 'px'; exMenu.style.top = (r.bottom + 4) + 'px';
+  exMenu.classList.toggle('show');
+  ev.stopPropagation();
+});
+document.addEventListener('click', () => exMenu.classList.remove('show'));
+
+/* 日誌收合 */
+$('#loghead').addEventListener('click', () => $('#logpanel').classList.toggle('collapsed'));
+
+/* ---------- 啟動 ---------- */
+(function init() {
+  renderAll();
+  showOverview();            // 預設畫面：FlowMap 總覽（原本是直接載入範例②進畫布）
+  log('歡迎使用 WorkFlowGraph。');
+  // 偵測本地 Claude：可用就自動切到真實模式
+  fetch('/api/health').then(r => r.json()).then(h => {
+    const st = document.getElementById('claude-status');
+    if (h.ok) {
+      st.textContent = '✓ 本地 Claude 已連線';
+      st.style.color = 'var(--green)';
+      cbSim.checked = false; state.simulate = false; tgSim.classList.remove('on');
+      log('已偵測到本地 Claude（' + (h.version || '') + '）— 已切換到真實模式，LLM 節點會呼叫你登入的 Claude Code。', 'ok');
+    } else {
+      st.textContent = '✗ 未偵測到本地 Claude';
+      st.style.color = 'var(--amber)';
+      log('未偵測到 claude 指令，維持模擬模式。安裝並登入 Claude Code 後重啟伺服器即可使用真實模式。', 'wr');
+    }
+  }).catch(() => {
+    document.getElementById('claude-status').textContent = '';
+  });
+})();
+</script>
+</body>
+</html>

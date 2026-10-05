@@ -1,0 +1,638 @@
+{
+  "id": "ws-councilb",
+  "name": "SkillCouncil-(B)拷問與精煉",
+  "createdAt": "2026-08-26T04:00:00.000Z",
+  "updatedAt": "2026-10-05T04:09:47.657Z",
+  "graph": {
+    "version": 1,
+    "nodes": [
+      {
+        "id": "nnote",
+        "type": "note",
+        "x": -40,
+        "y": -280,
+        "params": {
+          "text": "【XinCouncil 段 B：拷問補洞 → 資深工程師精煉】\n前置：段 A 已產出 outputs/01-facts.md 與 02-scope.md，且 scope 決議已經你審過。\n單獨執行：改「專案根目錄」節點輸入的預設值即可（已接線到所有程式碼查詢節點）。\n被「XinCouncil 全流程」引用時，由頂層輸入餵入。\n產出：outputs/03-grill-log.md、outputs/04-refined.md。\n拷問最多兩輪（硬性）；第二輪可能被拷問官宣告提前結束（走下方分支）。\n—\n成本優化（2026-08-26）：R1/R2 回答方接續「讀碼」會話（全流程模式下延續段 A 已讀入的程式碼）；\ngrill 整理改用 haiku。拷問官刻意不共用會話（對抗性需要獨立視角）。"
+        }
+      },
+      {
+        "id": "nmodproj",
+        "type": "modin",
+        "x": -300,
+        "y": 40,
+        "params": {
+          "_label": "專案根目錄",
+          "value": "（專案根目錄絕對路徑，例：E:\\github\\myproj）"
+        }
+      },
+      {
+        "id": "nmodsig",
+        "type": "modin",
+        "x": -300,
+        "y": 200,
+        "params": {
+          "_label": "上游scope訊號",
+          "value": "（接段 A 的 scope 決議；單獨執行時留預設即可，實際內容仍讀 outputs/02-scope.md）"
+        }
+      },
+      {
+        "id": "nsigshow",
+        "type": "output",
+        "x": -300,
+        "y": 360,
+        "params": {
+          "_label": "上游訊號顯示",
+          "name": "來自段 A 的 scope 決議"
+        }
+      },
+      {
+        "id": "nfifacts",
+        "type": "filein",
+        "x": -40,
+        "y": 40,
+        "params": {
+          "_label": "facts文件",
+          "path": "outputs/01-facts.md"
+        }
+      },
+      {
+        "id": "nfiscope",
+        "type": "filein",
+        "x": -40,
+        "y": 200,
+        "params": {
+          "_label": "scope決議",
+          "path": "outputs/02-scope.md"
+        }
+      },
+      {
+        "id": "nfigrill",
+        "type": "filein",
+        "x": -40,
+        "y": 360,
+        "params": {
+          "_label": "拷問規則",
+          "path": ""
+        }
+      },
+      {
+        "id": "nfirefine",
+        "type": "filein",
+        "x": -40,
+        "y": 520,
+        "params": {
+          "_label": "精煉規則",
+          "path": ""
+        }
+      },
+      {
+        "id": "ntplr1",
+        "type": "template",
+        "x": 240,
+        "y": 120,
+        "params": {
+          "_label": "R1出題素材",
+          "template": "【拷問規則】\n@拷問規則\n\n【facts 文件】\n@facts文件\n\n【scope 決議】\n@scope決議\n\n你是拷問官（依拷問規則的角色設定）。列出第一輪問題 8~12 題：每類問題至少一題，優先攻擊 scope 決議的「坑清單」與 facts 的 [?] 標記。只出題、編號 Q1~Qn，不要回答。"
+        }
+      },
+      {
+        "id": "nllmr1",
+        "type": "llm",
+        "x": 500,
+        "y": 120,
+        "params": {
+          "_label": "R1拷問官",
+          "constraint": "僅回答內容",
+          "model": "預設",
+          "system": "你是一位不留情面的 staff engineer 拷問官：假設文件有洞、假設回答方在唬爛，只問具體、可驗證的問題。"
+        }
+      },
+      {
+        "id": "ntplr1ans",
+        "type": "template",
+        "x": 760,
+        "y": 120,
+        "params": {
+          "_label": "R1作答素材",
+          "template": "【第一輪拷問問題】\n@R1拷問官\n\n【facts 文件（回答依據之一）】\n@facts文件\n\n你是回答方。鐵律：每題回答必須附 檔案:行號 佐證（用唯讀工具實際查碼確認，不憑印象）；引用不出來就回答「[GAP]」並立刻查碼補查——查到的寫進文末「## 補查結果」（每條附引用），查不到的標「[未解]」。逐題輸出 Q/A。"
+        }
+      },
+      {
+        "id": "ncqr1",
+        "type": "codequery",
+        "x": 1020,
+        "y": 120,
+        "params": {
+          "_label": "R1回答方",
+          "folder": "",
+          "model": "預設",
+          "session": "讀碼"
+        }
+      },
+      {
+        "id": "ntplr2",
+        "type": "template",
+        "x": 1280,
+        "y": 120,
+        "params": {
+          "_label": "R2出題素材",
+          "template": "【拷問規則】\n@拷問規則\n\n【第一輪問答（含補查結果）】\n@R1回答方\n\n你是拷問官。依終止條件判斷：若第一輪回答夠紮實（連續多題都能附引用回答），輸出以「【提前結束】」開頭的一行，加一句文件強度總評，不要出題。否則發動第二輪追問：只追第一輪暴露弱點的方向，至多 12 題，編號 Q1~Qn，只出題不回答。"
+        }
+      },
+      {
+        "id": "nllmr2",
+        "type": "llm",
+        "x": 1540,
+        "y": 120,
+        "params": {
+          "_label": "R2拷問官",
+          "constraint": "僅回答內容",
+          "model": "預設",
+          "system": "你是同一位拷問官。嚴格遵守輸出格式：提前結束時第一行必須是「【提前結束】」。"
+        }
+      },
+      {
+        "id": "ncond",
+        "type": "condition",
+        "x": 1800,
+        "y": 120,
+        "params": {
+          "_label": "R2題目閘門",
+          "expr": "!String(value).trim().startsWith('【提前結束】')"
+        }
+      },
+      {
+        "id": "ntplr2ans",
+        "type": "template",
+        "x": 2060,
+        "y": 60,
+        "params": {
+          "_label": "R2作答素材",
+          "template": "【第二輪拷問問題】\n@R2題目閘門\n\n你是回答方，規則同第一輪：每題回答必附 檔案:行號（唯讀工具實際查碼）；答不出標 [GAP] 並查碼補查，補查結果集中在文末「## 補查結果」。逐題輸出 Q/A。"
+        }
+      },
+      {
+        "id": "ncqr2",
+        "type": "codequery",
+        "x": 2320,
+        "y": 60,
+        "params": {
+          "_label": "R2回答方",
+          "folder": "",
+          "model": "預設",
+          "session": "讀碼"
+        }
+      },
+      {
+        "id": "nmergeg",
+        "type": "merge",
+        "x": 2580,
+        "y": 160,
+        "params": {
+          "_label": "grill彙整",
+          "mode": "全部串接",
+          "sep": "空一行",
+          "headers": "是"
+        }
+      },
+      {
+        "id": "ntpllog",
+        "type": "template",
+        "x": 2840,
+        "y": 240,
+        "params": {
+          "_label": "log素材",
+          "template": "【拷問規則（含產出格式）】\n@拷問規則\n\n【拷問素材（各輪問答與補查）】\n@grill彙整\n\n把素材整理成 03-grill-log.md：依拷問規則的產出格式（Round 1 問答附引用、Gap 清單標 [已補]/[未解]、Round 2 或提前結束宣告、結論的文件強度評估）。不得新增素材以外的問答內容。"
+        }
+      },
+      {
+        "id": "nllmlog",
+        "type": "llm",
+        "x": 3100,
+        "y": 240,
+        "params": {
+          "_label": "grill整理",
+          "constraint": "僅回答內容",
+          "model": "haiku",
+          "system": "你是文件整理者：只重組、不新增。輸出 03-grill-log.md 全文。"
+        }
+      },
+      {
+        "id": "nfolog",
+        "type": "fileout",
+        "x": 3360,
+        "y": 160,
+        "params": {
+          "_label": "存03-grill-log",
+          "name": "03-grill-log.md",
+          "type": "md",
+          "folder": "",
+          "style": ""
+        }
+      },
+      {
+        "id": "ntplrefine",
+        "type": "template",
+        "x": 3360,
+        "y": 400,
+        "params": {
+          "_label": "精煉素材",
+          "template": "【精煉 checklist】\n@精煉規則\n\n【scope 決議】\n@scope決議\n\n【facts 文件】\n@facts文件\n\n【拷問紀錄（含補洞）】\n@grill整理\n\n以資深工程師視角把素材精煉成 04-refined.md。精煉是收斂：只刪、改寫、重組，不新增素材沒有的內容；checklist 每項都要過；[未解] 的 gap 誠實標註；開頭保留版本錨點，結構依 scope 的章節骨架（偏離要加結構註記），末尾附「素材分工表」（哪些進 SKILL.md 正文、哪些進 references）。輸出 04-refined.md 全文。"
+        }
+      },
+      {
+        "id": "nllmrefine",
+        "type": "llm",
+        "x": 3620,
+        "y": 400,
+        "params": {
+          "_label": "精煉",
+          "constraint": "僅回答內容",
+          "model": "預設",
+          "system": "你是寫了十五年程式的資深工程師：討厭廢話、只信能對到程式碼的陳述。只收斂不新增；寧可句子笨拙，不可陳述錯誤。輸出 04-refined.md 全文。"
+        }
+      },
+      {
+        "id": "nforefined",
+        "type": "fileout",
+        "x": 3880,
+        "y": 320,
+        "params": {
+          "_label": "存04-refined",
+          "name": "04-refined.md",
+          "type": "md",
+          "folder": "",
+          "style": ""
+        }
+      },
+      {
+        "id": "noutb",
+        "type": "output",
+        "x": 3880,
+        "y": 480,
+        "params": {
+          "_label": "精煉結果",
+          "name": "04-refined（段 C 的素材）"
+        }
+      },
+      {
+        "id": "nmodrefined",
+        "type": "modout",
+        "x": 3880,
+        "y": 640,
+        "params": {
+          "_label": "refined產出"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "from": {
+          "node": "nmodsig",
+          "port": "out"
+        },
+        "to": {
+          "node": "nsigshow",
+          "port": "value"
+        }
+      },
+      {
+        "id": "e2",
+        "from": {
+          "node": "nfigrill",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplr1",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e3",
+        "from": {
+          "node": "nfifacts",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplr1",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e4",
+        "from": {
+          "node": "nfiscope",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplr1",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e5",
+        "from": {
+          "node": "ntplr1",
+          "port": "out"
+        },
+        "to": {
+          "node": "nllmr1",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e6",
+        "from": {
+          "node": "nllmr1",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplr1ans",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e7",
+        "from": {
+          "node": "nfifacts",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplr1ans",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e8",
+        "from": {
+          "node": "ntplr1ans",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqr1",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e9",
+        "from": {
+          "node": "nmodproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqr1",
+          "port": "folder"
+        }
+      },
+      {
+        "id": "e10",
+        "from": {
+          "node": "nfigrill",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplr2",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e11",
+        "from": {
+          "node": "ncqr1",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplr2",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e12",
+        "from": {
+          "node": "ntplr2",
+          "port": "out"
+        },
+        "to": {
+          "node": "nllmr2",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e13",
+        "from": {
+          "node": "nllmr2",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncond",
+          "port": "value"
+        }
+      },
+      {
+        "id": "e14",
+        "from": {
+          "node": "ncond",
+          "port": "true"
+        },
+        "to": {
+          "node": "ntplr2ans",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e15",
+        "from": {
+          "node": "ntplr2ans",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqr2",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e16",
+        "from": {
+          "node": "nmodproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqr2",
+          "port": "folder"
+        }
+      },
+      {
+        "id": "e17",
+        "from": {
+          "node": "ncqr1",
+          "port": "out"
+        },
+        "to": {
+          "node": "nmergeg",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e18",
+        "from": {
+          "node": "ncqr2",
+          "port": "out"
+        },
+        "to": {
+          "node": "nmergeg",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e19",
+        "from": {
+          "node": "ncond",
+          "port": "false"
+        },
+        "to": {
+          "node": "nmergeg",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e20",
+        "from": {
+          "node": "nfigrill",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntpllog",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e21",
+        "from": {
+          "node": "nmergeg",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntpllog",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e22",
+        "from": {
+          "node": "ntpllog",
+          "port": "out"
+        },
+        "to": {
+          "node": "nllmlog",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e23",
+        "from": {
+          "node": "nllmlog",
+          "port": "out"
+        },
+        "to": {
+          "node": "nfolog",
+          "port": "content"
+        }
+      },
+      {
+        "id": "e24",
+        "from": {
+          "node": "nfirefine",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplrefine",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e25",
+        "from": {
+          "node": "nfiscope",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplrefine",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e26",
+        "from": {
+          "node": "nfifacts",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplrefine",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e27",
+        "from": {
+          "node": "nllmlog",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplrefine",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e28",
+        "from": {
+          "node": "ntplrefine",
+          "port": "out"
+        },
+        "to": {
+          "node": "nllmrefine",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e29",
+        "from": {
+          "node": "nllmrefine",
+          "port": "out"
+        },
+        "to": {
+          "node": "nforefined",
+          "port": "content"
+        }
+      },
+      {
+        "id": "e30",
+        "from": {
+          "node": "nllmrefine",
+          "port": "out"
+        },
+        "to": {
+          "node": "noutb",
+          "port": "value"
+        }
+      },
+      {
+        "id": "e31",
+        "from": {
+          "node": "nllmrefine",
+          "port": "out"
+        },
+        "to": {
+          "node": "nmodrefined",
+          "port": "value"
+        }
+      }
+    ]
+  },
+  "view": {
+    "tx": 569.1350770000003,
+    "ty": 138.35202299999992,
+    "s": 1.0983678200000004
+  },
+  "projectId": "pj-mtaznoc9wa3aii"
+}

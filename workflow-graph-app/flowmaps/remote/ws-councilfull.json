@@ -1,0 +1,269 @@
+{
+  "id": "ws-councilfull",
+  "name": "SkillCouncil-Skill產生器",
+  "createdAt": "2026-08-26T04:00:00.000Z",
+  "updatedAt": "2026-10-05T04:09:10.122Z",
+  "graph": {
+    "version": 1,
+    "nodes": [
+      {
+        "id": "nnote",
+        "type": "note",
+        "x": -40,
+        "y": -320,
+        "params": {
+          "text": "【XinCouncil 全流程】一鍵跑完 段A 事實與範圍 → 段B 拷問與精煉 → 段C 產出與驗證。\n執行前設定：兩個輸入節點＋「📁 專案根目錄」（點節點後用檢查器的 📂 瀏覽選資料夾），\n專案根目錄會自動餵給三段內所有 🔬 程式碼查詢。\n⚠ 全自動模式沒有 scope 否決點——要逐段人工把關，改成分開執行 A、B、C 三個 Workspace\n（它們各自可獨立執行，中間產物都在伺服器 outputs/）。\n產出：outputs/01~04 中間文件 ＋ outputs/skill/（SKILL.md 與 references/）。\n模組是即時引用：改了 A/B/C 並儲存後，這裡直接重跑即可生效。\n—\n2026-08-26：A/B/C 已內建會話群組（讀碼／驗碼）與模型分級，重跑即生效。\n復原程序：任一段中斷時不必全部重跑——中間產物都在 outputs/，單獨執行下一段\n（設好該段「專案根目錄」的預設值）即可從斷點續起。"
+        }
+      },
+      {
+        "id": "ninmod",
+        "type": "input",
+        "x": -40,
+        "y": 40,
+        "params": {
+          "_label": "說明",
+          "value": "簡述這個東西的功能"
+        }
+      },
+      {
+        "id": "ninctx",
+        "type": "input",
+        "x": -40,
+        "y": 200,
+        "params": {
+          "_label": "使用情境",
+          "value": "簡述這個東西使用的情境"
+        }
+      },
+      {
+        "id": "ninproj",
+        "type": "folderlink",
+        "x": -40,
+        "y": 360,
+        "params": {
+          "_label": "目標路徑",
+          "path": ""
+        }
+      },
+      {
+        "id": "nsubA",
+        "type": "subflow",
+        "x": 320,
+        "y": 120,
+        "params": {
+          "_ports": {
+            "inputs": [
+              {
+                "name": "ninmod",
+                "label": "目標模組"
+              },
+              {
+                "name": "ninctx",
+                "label": "使用情境"
+              },
+              {
+                "name": "ninproj",
+                "label": "專案根目錄"
+              }
+            ],
+            "outputs": [
+              {
+                "name": "nmodscope",
+                "label": "scope決議產出"
+              }
+            ]
+          },
+          "fmId": "ws-councila",
+          "_fmName": "XinCouncil A 事實與範圍"
+        }
+      },
+      {
+        "id": "nsubB",
+        "type": "subflow",
+        "x": 680,
+        "y": 200,
+        "params": {
+          "_ports": {
+            "inputs": [
+              {
+                "name": "nmodproj",
+                "label": "專案根目錄"
+              },
+              {
+                "name": "nmodsig",
+                "label": "上游scope訊號"
+              }
+            ],
+            "outputs": [
+              {
+                "name": "nmodrefined",
+                "label": "refined產出"
+              }
+            ]
+          },
+          "fmId": "ws-councilb",
+          "_fmName": "XinCouncil B 拷問與精煉"
+        }
+      },
+      {
+        "id": "nsubC",
+        "type": "subflow",
+        "x": 1040,
+        "y": 280,
+        "params": {
+          "_ports": {
+            "inputs": [
+              {
+                "name": "nmodproj",
+                "label": "專案根目錄"
+              },
+              {
+                "name": "nmodsig",
+                "label": "上游refined訊號"
+              }
+            ],
+            "outputs": [
+              {
+                "name": "nmodresult",
+                "label": "最終結果"
+              }
+            ]
+          },
+          "fmId": "ws-councilc",
+          "_fmName": "XinCouncil C 產出與驗證"
+        }
+      },
+      {
+        "id": "noutfinal",
+        "type": "output",
+        "x": 1400,
+        "y": 280,
+        "params": {
+          "_label": "全流程結果",
+          "name": "全流程結果（skill 在 outputs/skill/；【驗證失敗】開頭＝需人工介入）"
+        }
+      },
+      {
+        "id": "n0mtkz22",
+        "type": "fileout",
+        "x": 1405,
+        "y": 594,
+        "params": {
+          "name": "Council",
+          "type": "md",
+          "folder": "",
+          "style": ""
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "from": {
+          "node": "ninmod",
+          "port": "out"
+        },
+        "to": {
+          "node": "nsubA",
+          "port": "ninmod"
+        }
+      },
+      {
+        "id": "e2",
+        "from": {
+          "node": "ninctx",
+          "port": "out"
+        },
+        "to": {
+          "node": "nsubA",
+          "port": "ninctx"
+        }
+      },
+      {
+        "id": "e3",
+        "from": {
+          "node": "ninproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "nsubA",
+          "port": "ninproj"
+        }
+      },
+      {
+        "id": "e4",
+        "from": {
+          "node": "ninproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "nsubB",
+          "port": "nmodproj"
+        }
+      },
+      {
+        "id": "e5",
+        "from": {
+          "node": "nsubA",
+          "port": "nmodscope"
+        },
+        "to": {
+          "node": "nsubB",
+          "port": "nmodsig"
+        }
+      },
+      {
+        "id": "e6",
+        "from": {
+          "node": "ninproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "nsubC",
+          "port": "nmodproj"
+        }
+      },
+      {
+        "id": "e7",
+        "from": {
+          "node": "nsubB",
+          "port": "nmodrefined"
+        },
+        "to": {
+          "node": "nsubC",
+          "port": "nmodsig"
+        }
+      },
+      {
+        "id": "e8",
+        "from": {
+          "node": "nsubC",
+          "port": "nmodresult"
+        },
+        "to": {
+          "node": "noutfinal",
+          "port": "value"
+        }
+      },
+      {
+        "id": "n2c9d6w0",
+        "from": {
+          "node": "nsubC",
+          "port": "nmodresult"
+        },
+        "to": {
+          "node": "n0mtkz22",
+          "port": "content"
+        }
+      }
+    ]
+  },
+  "view": {
+    "tx": 797.2112880169,
+    "ty": 94.81282968619992,
+    "s": 0.8717408790750004
+  },
+  "projectId": "pj-mtaznoc9wa3aii",
+  "order": 1787803506267,
+  "visibility": "public"
+}

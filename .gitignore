@@ -1,0 +1,52 @@
+# ── 執行期產物 ─────────────────────────────────────────────
+# server.js 啟動時寫入自己的 PID；scripts/ctl.js 背景啟動時寫入日誌
+server.pid
+server.log
+*.log
+
+# 輸出檔案節點的預設存檔目錄（執行時自動建立，內容是使用者產物）
+outputs/
+
+# FlowMap 儲存目錄（flowmaps/，原名 workspaces/）分成兩層：
+#   flowmaps/remote/ → 進版控（團隊共用的 Project 與範例），不忽略
+#   flowmaps/local/  → 只存在這台機器，整個忽略（含它自己的 projects.json，Project 名稱也不外流）
+**/flowmaps/local/
+
+# ── Node ──────────────────────────────────────────────────
+# 本專案零依賴，但仍避免誤加入
+node_modules/
+package-lock.json
+npm-debug.log*
+.npm/
+
+# ── 環境變數／機密 ────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── 編輯器／IDE ───────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── 作業系統 ──────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# ── 暫存 ──────────────────────────────────────────────────
+tmp/
+temp/
+*.tmp
+*.bak
+
+# 本工作階段暫存（可安全刪除）
+_to_delete/

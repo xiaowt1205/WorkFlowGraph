@@ -1,0 +1,817 @@
+{
+  "id": "ws-councilc",
+  "name": "SkillCouncil-(C)產出與驗證",
+  "createdAt": "2026-08-26T04:00:00.000Z",
+  "updatedAt": "2026-10-05T04:09:38.856Z",
+  "graph": {
+    "version": 1,
+    "nodes": [
+      {
+        "id": "nnote",
+        "type": "note",
+        "x": -40,
+        "y": -300,
+        "params": {
+          "text": "【XinCouncil 段 C：產出 skill → 對碼驗證（含一輪回修）】\n前置：段 B 已產出 outputs/03-grill-log.md 與 04-refined.md。\n單獨執行：改「專案根目錄」節點輸入的預設值即可（已接線到所有程式碼查詢節點）。\n被「XinCouncil 全流程」引用時，由頂層輸入餵入。\n產出：outputs/skill/SKILL.md ＋ outputs/skill/references/（api / internals / pitfalls）。\n驗證失敗會自動修一輪並覆寫 SKILL.md 再驗；仍不過 → 「需人工介入」。\n—\n成本優化（2026-08-26）：references 三檔改為一次 LLM 產出（===FILE: 標記）＋三顆程式碼節點切檔，\n省掉兩次重複餵 04-refined 的呼叫；「對碼查證→再次對碼」共用「驗碼」會話（程式碼重用、\n且再驗的視野機制上錨定在第一輪報告，防驗證範圍漂移）。「只看skill作答」刻意獨立——隔離是它的功能。"
+        }
+      },
+      {
+        "id": "nmodproj",
+        "type": "modin",
+        "x": -300,
+        "y": 40,
+        "params": {
+          "_label": "專案根目錄",
+          "value": "（專案根目錄絕對路徑，例：E:\\github\\myproj）"
+        }
+      },
+      {
+        "id": "nmodsig",
+        "type": "modin",
+        "x": -300,
+        "y": 200,
+        "params": {
+          "_label": "上游refined訊號",
+          "value": "（接段 B 的 refined 產出；單獨執行時留預設即可，實際內容仍讀 outputs/04-refined.md）"
+        }
+      },
+      {
+        "id": "nsigshow",
+        "type": "output",
+        "x": -300,
+        "y": 360,
+        "params": {
+          "_label": "上游訊號顯示",
+          "name": "來自段 B 的 04-refined"
+        }
+      },
+      {
+        "id": "nfirefined",
+        "type": "filein",
+        "x": -40,
+        "y": 40,
+        "params": {
+          "_label": "refined文件",
+          "path": "outputs/04-refined.md"
+        }
+      },
+      {
+        "id": "nfiglog",
+        "type": "filein",
+        "x": -40,
+        "y": 200,
+        "params": {
+          "_label": "grill紀錄",
+          "path": "outputs/03-grill-log.md"
+        }
+      },
+      {
+        "id": "nfisktpl",
+        "type": "filein",
+        "x": -40,
+        "y": 360,
+        "params": {
+          "_label": "SKILLMD樣板",
+          "path": "C:\\Users\\justin.xiao\\Desktop\\XinSkillCouncil\\xin-skill-council\\references\\skillmd-template.md"
+        }
+      },
+      {
+        "id": "nfiouttpl",
+        "type": "filein",
+        "x": -40,
+        "y": 520,
+        "params": {
+          "_label": "產出模板",
+          "path": "C:\\Users\\justin.xiao\\Desktop\\XinSkillCouncil\\xin-skill-council\\references\\output-template.md"
+        }
+      },
+      {
+        "id": "ntplskill",
+        "type": "template",
+        "x": 240,
+        "y": 120,
+        "params": {
+          "_label": "SKILL素材",
+          "template": "【SKILL.md 骨架樣板（必須遵循）】\n@SKILLMD樣板\n\n【目錄結構與版本標記規則】\n@產出模板\n\n【素材：04-refined】\n@refined文件\n\n【拷問紀錄（藉口表從這裡提煉）】\n@grill紀錄\n\n依骨架樣板產出 SKILL.md 全文：frontmatter（name/description/metadata.pattern 依 scope 決議）、版本錨點區塊、心智模型、何時用/不用、核心用法（Good/Bad 對照，真實簽名）、坑清單 top 3、藉口表（從拷問中「差點答錯」處提煉）、red flags、驗證 checklist、References 表。正文 ≤300 行；素材分工表標記為 references 的內容不放正文。空節直接刪。[未解] 的未知區域照實標註 ⚠ 未驗證。\n\nReferences 表**只列實際會產出的三份檔案**：references/api.md、references/internals.md、references/pitfalls.md——不要發明其他檔名；素材分工表若提出其他檔案，把該內容歸入這三份之一。"
+        }
+      },
+      {
+        "id": "nllmskill",
+        "type": "llm",
+        "x": 500,
+        "y": 120,
+        "params": {
+          "_label": "SKILL產出",
+          "constraint": "僅回答內容",
+          "model": "預設",
+          "system": "你依樣板產出模組 skill 的 SKILL.md。事實與引用只從素材來，不得虛構；範例一律用素材中的真實簽名。只輸出 SKILL.md 全文。"
+        }
+      },
+      {
+        "id": "nfoskill",
+        "type": "fileout",
+        "x": 760,
+        "y": 40,
+        "params": {
+          "_label": "存SKILL",
+          "name": "SKILL.md",
+          "type": "md",
+          "folder": "outputs/skill",
+          "style": ""
+        }
+      },
+      {
+        "id": "nforefapi",
+        "type": "fileout",
+        "x": 980,
+        "y": 400,
+        "params": {
+          "_label": "存api.md",
+          "name": "api.md",
+          "type": "md",
+          "folder": "outputs/skill/references",
+          "style": ""
+        }
+      },
+      {
+        "id": "nforefint",
+        "type": "fileout",
+        "x": 980,
+        "y": 560,
+        "params": {
+          "_label": "存internals.md",
+          "name": "internals.md",
+          "type": "md",
+          "folder": "outputs/skill/references",
+          "style": ""
+        }
+      },
+      {
+        "id": "nforefpit",
+        "type": "fileout",
+        "x": 980,
+        "y": 720,
+        "params": {
+          "_label": "存pitfalls.md",
+          "name": "pitfalls.md",
+          "type": "md",
+          "folder": "outputs/skill/references",
+          "style": ""
+        }
+      },
+      {
+        "id": "ntplvq",
+        "type": "template",
+        "x": 1020,
+        "y": 120,
+        "params": {
+          "_label": "驗證素材",
+          "template": "【拷問紀錄】\n@grill紀錄\n\n【SKILL.md】\n@SKILL產出\n\n從拷問紀錄挑 3~5 個最刁鑽的問題，只依 SKILL.md 的內容回答（不得使用其他來源；SKILL.md 答不了就寫「skill 未涵蓋」）。逐題輸出：問題／只看 skill 的答案／該答案引用的 檔案:行號。"
+        }
+      },
+      {
+        "id": "nllmvq",
+        "type": "llm",
+        "x": 1280,
+        "y": 120,
+        "params": {
+          "_label": "只看skill作答",
+          "constraint": "僅回答內容",
+          "model": "預設",
+          "system": "你只准使用題目附上的 SKILL.md 內容作答，禁止引入任何其他知識——這是在測 skill 本身夠不夠用。"
+        }
+      },
+      {
+        "id": "ntplchk",
+        "type": "template",
+        "x": 1540,
+        "y": 120,
+        "params": {
+          "_label": "對碼素材",
+          "template": "【只看 skill 的作答】\n@只看skill作答\n\n用唯讀工具對照原始碼逐題查證：答案正確嗎？並抽查其中 5 個 檔案:行號 引用是否與內容相符。\n輸出格式（嚴格遵守）：全部正確 → 第一行「【驗證通過】」＋逐題確認；有任何錯 → 第一行「【驗證失敗】」＋逐條列出錯在哪（附正確的 檔案:行號）。"
+        }
+      },
+      {
+        "id": "ncqchk",
+        "type": "codequery",
+        "x": 1800,
+        "y": 120,
+        "params": {
+          "_label": "對碼查證",
+          "folder": "",
+          "model": "預設",
+          "session": "驗碼"
+        }
+      },
+      {
+        "id": "ncondpass",
+        "type": "condition",
+        "x": 2060,
+        "y": 120,
+        "params": {
+          "_label": "驗證閘門",
+          "expr": "String(value).trim().startsWith('【驗證通過】')"
+        }
+      },
+      {
+        "id": "noutdone",
+        "type": "output",
+        "x": 2320,
+        "y": 20,
+        "params": {
+          "_label": "完成",
+          "name": "驗證通過——skill 已在 outputs/skill/"
+        }
+      },
+      {
+        "id": "ntplfix",
+        "type": "template",
+        "x": 2320,
+        "y": 240,
+        "params": {
+          "_label": "修復素材",
+          "template": "【SKILL.md 原文】\n@SKILL產出\n\n【驗證失敗報告】\n@驗證閘門\n\n只修正報告指出的錯誤（含錯誤引用），其餘內容一字不動；修不了的段落標 ⚠ 未驗證。輸出修正後 SKILL.md 全文。"
+        }
+      },
+      {
+        "id": "nllmfix",
+        "type": "llm",
+        "x": 2580,
+        "y": 240,
+        "params": {
+          "_label": "SKILL修復",
+          "constraint": "僅回答內容",
+          "model": "預設",
+          "system": "你是最小幅度修復者：只改報告指出的地方。只輸出修正後 SKILL.md 全文。"
+        }
+      },
+      {
+        "id": "nfofix",
+        "type": "fileout",
+        "x": 2840,
+        "y": 160,
+        "params": {
+          "_label": "覆寫SKILL",
+          "name": "SKILL.md",
+          "type": "md",
+          "folder": "outputs/skill",
+          "style": ""
+        }
+      },
+      {
+        "id": "ntplre",
+        "type": "template",
+        "x": 2840,
+        "y": 340,
+        "params": {
+          "_label": "再驗素材",
+          "template": "【修正後 SKILL.md】\n@SKILL修復\n\n【先前的驗證失敗報告】\n@驗證閘門\n\n用唯讀工具確認報告指出的每個錯誤都已修正、引用有效。\n輸出格式（嚴格遵守）：已全部修正 → 第一行「【驗證通過】」；仍有錯 → 第一行「【驗證失敗】」＋清單。"
+        }
+      },
+      {
+        "id": "ncqre",
+        "type": "codequery",
+        "x": 3100,
+        "y": 340,
+        "params": {
+          "_label": "再次對碼",
+          "folder": "",
+          "model": "預設",
+          "session": "驗碼"
+        }
+      },
+      {
+        "id": "ncondre",
+        "type": "condition",
+        "x": 3360,
+        "y": 340,
+        "params": {
+          "_label": "再驗閘門",
+          "expr": "String(value).trim().startsWith('【驗證通過】')"
+        }
+      },
+      {
+        "id": "noutdone2",
+        "type": "output",
+        "x": 3620,
+        "y": 260,
+        "params": {
+          "_label": "回修後通過",
+          "name": "回修後驗證通過——skill 已覆寫於 outputs/skill/"
+        }
+      },
+      {
+        "id": "noutmanual",
+        "type": "output",
+        "x": 3620,
+        "y": 420,
+        "params": {
+          "_label": "需人工介入",
+          "name": "⚠ 回修一輪後仍未通過——請人工檢視（硬性終止，不再自動重試）"
+        }
+      },
+      {
+        "id": "nmergeend",
+        "type": "merge",
+        "x": 3880,
+        "y": 120,
+        "params": {
+          "_label": "結局收斂",
+          "mode": "全部串接",
+          "sep": "空一行",
+          "headers": "是"
+        }
+      },
+      {
+        "id": "nmodresult",
+        "type": "modout",
+        "x": 4140,
+        "y": 120,
+        "params": {
+          "_label": "最終結果"
+        }
+      },
+      {
+        "id": "ntplrefs",
+        "type": "template",
+        "x": 240,
+        "y": 480,
+        "params": {
+          "_label": "refs素材",
+          "template": "【素材：04-refined】\n@refined文件\n\n依素材末尾「素材分工表」中分給 references 的內容，一次產出三份 reference 文件全文，依下列順序輸出，檔案之間只用標記行分隔（標記行獨立成行、一字不差）：\n\n===FILE: references/api.md===\n（此區段內容＝完整 API 參考：所有公開介面的簽名、參數、回傳、錯誤路徑）\n\n===FILE: references/internals.md===\n（此區段內容＝內部結構與資料流：修改此模組時才需要讀的實作細節）\n\n===FILE: references/pitfalls.md===\n（此區段內容＝坑清單完整版：正文 top 3 以外的所有坑，含重現方式與規避方法）\n\n共同規則：保留所有 檔案:行號 引用；素材沒有的內容不得新增；單檔超過 300 行時在該檔開頭加目錄。"
+        }
+      },
+      {
+        "id": "nllmrefs",
+        "type": "llm",
+        "x": 500,
+        "y": 480,
+        "params": {
+          "_label": "references產出",
+          "constraint": "僅回答內容",
+          "model": "預設",
+          "session": "",
+          "timeout": 0,
+          "system": "你依素材分工表一次產出 skill 的三份 reference 文件，只重組不新增。輸出格式（嚴格遵守）：三份檔案全文依序輸出，每份之前單獨一行「===FILE: references/檔名===」標記（一字不差），除標記與檔案內容外不要任何前言、結語或圍欄。"
+        }
+      },
+      {
+        "id": "ncutapi",
+        "type": "code",
+        "x": 740,
+        "y": 400,
+        "params": {
+          "_label": "切api.md",
+          "code": "const parts = String(a).split(/^===FILE: (references\\/[\\w.]+)===\\s*$/m);\nconst map = {}; for (let i = 1; i + 1 < parts.length; i += 2) map[parts[i]] = parts[i + 1].trim();\nconst body = map['references/api.md'];\nif (!body) throw new Error('references 產出缺少 api.md 區段（===FILE: references/api.md=== 標記行遺失，請檢查「references產出」節點輸出）');\nreturn body;"
+        }
+      },
+      {
+        "id": "ncutint",
+        "type": "code",
+        "x": 740,
+        "y": 560,
+        "params": {
+          "_label": "切internals.md",
+          "code": "const parts = String(a).split(/^===FILE: (references\\/[\\w.]+)===\\s*$/m);\nconst map = {}; for (let i = 1; i + 1 < parts.length; i += 2) map[parts[i]] = parts[i + 1].trim();\nconst body = map['references/internals.md'];\nif (!body) throw new Error('references 產出缺少 internals.md 區段（===FILE: references/internals.md=== 標記行遺失，請檢查「references產出」節點輸出）');\nreturn body;"
+        }
+      },
+      {
+        "id": "ncutpit",
+        "type": "code",
+        "x": 740,
+        "y": 720,
+        "params": {
+          "_label": "切pitfalls.md",
+          "code": "const parts = String(a).split(/^===FILE: (references\\/[\\w.]+)===\\s*$/m);\nconst map = {}; for (let i = 1; i + 1 < parts.length; i += 2) map[parts[i]] = parts[i + 1].trim();\nconst body = map['references/pitfalls.md'];\nif (!body) throw new Error('references 產出缺少 pitfalls.md 區段（===FILE: references/pitfalls.md=== 標記行遺失，請檢查「references產出」節點輸出）');\nreturn body;"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "from": {
+          "node": "nmodsig",
+          "port": "out"
+        },
+        "to": {
+          "node": "nsigshow",
+          "port": "value"
+        }
+      },
+      {
+        "id": "e2",
+        "from": {
+          "node": "nfisktpl",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplskill",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e3",
+        "from": {
+          "node": "nfiouttpl",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplskill",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e4",
+        "from": {
+          "node": "nfirefined",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplskill",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e5",
+        "from": {
+          "node": "nfiglog",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplskill",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e6",
+        "from": {
+          "node": "ntplskill",
+          "port": "out"
+        },
+        "to": {
+          "node": "nllmskill",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e7",
+        "from": {
+          "node": "nllmskill",
+          "port": "out"
+        },
+        "to": {
+          "node": "nfoskill",
+          "port": "content"
+        }
+      },
+      {
+        "id": "e17",
+        "from": {
+          "node": "nfiglog",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplvq",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e18",
+        "from": {
+          "node": "nllmskill",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplvq",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e19",
+        "from": {
+          "node": "ntplvq",
+          "port": "out"
+        },
+        "to": {
+          "node": "nllmvq",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e20",
+        "from": {
+          "node": "nllmvq",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplchk",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e21",
+        "from": {
+          "node": "ntplchk",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqchk",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e22",
+        "from": {
+          "node": "nmodproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqchk",
+          "port": "folder"
+        }
+      },
+      {
+        "id": "e23",
+        "from": {
+          "node": "ncqchk",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncondpass",
+          "port": "value"
+        }
+      },
+      {
+        "id": "e24",
+        "from": {
+          "node": "ncondpass",
+          "port": "true"
+        },
+        "to": {
+          "node": "noutdone",
+          "port": "value"
+        }
+      },
+      {
+        "id": "e25",
+        "from": {
+          "node": "ncondpass",
+          "port": "false"
+        },
+        "to": {
+          "node": "ntplfix",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e26",
+        "from": {
+          "node": "nllmskill",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplfix",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e27",
+        "from": {
+          "node": "ntplfix",
+          "port": "out"
+        },
+        "to": {
+          "node": "nllmfix",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e28",
+        "from": {
+          "node": "nllmfix",
+          "port": "out"
+        },
+        "to": {
+          "node": "nfofix",
+          "port": "content"
+        }
+      },
+      {
+        "id": "e29",
+        "from": {
+          "node": "nllmfix",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplre",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e30",
+        "from": {
+          "node": "ncondpass",
+          "port": "false"
+        },
+        "to": {
+          "node": "ntplre",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e31",
+        "from": {
+          "node": "ntplre",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqre",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "e32",
+        "from": {
+          "node": "nmodproj",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncqre",
+          "port": "folder"
+        }
+      },
+      {
+        "id": "e33",
+        "from": {
+          "node": "ncqre",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncondre",
+          "port": "value"
+        }
+      },
+      {
+        "id": "e34",
+        "from": {
+          "node": "ncondre",
+          "port": "true"
+        },
+        "to": {
+          "node": "noutdone2",
+          "port": "value"
+        }
+      },
+      {
+        "id": "e35",
+        "from": {
+          "node": "ncondre",
+          "port": "false"
+        },
+        "to": {
+          "node": "noutmanual",
+          "port": "value"
+        }
+      },
+      {
+        "id": "e36",
+        "from": {
+          "node": "ncondpass",
+          "port": "true"
+        },
+        "to": {
+          "node": "nmergeend",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e37",
+        "from": {
+          "node": "ncondre",
+          "port": "true"
+        },
+        "to": {
+          "node": "nmergeend",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e38",
+        "from": {
+          "node": "ncondre",
+          "port": "false"
+        },
+        "to": {
+          "node": "nmergeend",
+          "port": "in"
+        }
+      },
+      {
+        "id": "e39",
+        "from": {
+          "node": "nmergeend",
+          "port": "out"
+        },
+        "to": {
+          "node": "nmodresult",
+          "port": "value"
+        }
+      },
+      {
+        "id": "er1",
+        "from": {
+          "node": "nfirefined",
+          "port": "out"
+        },
+        "to": {
+          "node": "ntplrefs",
+          "port": "in"
+        }
+      },
+      {
+        "id": "er2",
+        "from": {
+          "node": "ntplrefs",
+          "port": "out"
+        },
+        "to": {
+          "node": "nllmrefs",
+          "port": "prompt"
+        }
+      },
+      {
+        "id": "er3",
+        "from": {
+          "node": "nllmrefs",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncutapi",
+          "port": "a"
+        }
+      },
+      {
+        "id": "er4",
+        "from": {
+          "node": "nllmrefs",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncutint",
+          "port": "a"
+        }
+      },
+      {
+        "id": "er5",
+        "from": {
+          "node": "nllmrefs",
+          "port": "out"
+        },
+        "to": {
+          "node": "ncutpit",
+          "port": "a"
+        }
+      },
+      {
+        "id": "er6",
+        "from": {
+          "node": "ncutapi",
+          "port": "out"
+        },
+        "to": {
+          "node": "nforefapi",
+          "port": "content"
+        }
+      },
+      {
+        "id": "er7",
+        "from": {
+          "node": "ncutint",
+          "port": "out"
+        },
+        "to": {
+          "node": "nforefint",
+          "port": "content"
+        }
+      },
+      {
+        "id": "er8",
+        "from": {
+          "node": "ncutpit",
+          "port": "out"
+        },
+        "to": {
+          "node": "nforefpit",
+          "port": "content"
+        }
+      }
+    ]
+  },
+  "view": {
+    "tx": 60,
+    "ty": 40,
+    "s": 0.62
+  },
+  "projectId": "pj-mtaznoc9wa3aii",
+  "order": 1787716801000
+}
