@@ -2089,6 +2089,12 @@ function renderInspector() {
           `執行時載入來源<b>最後儲存的版本</b>；埠定義在開啟本 FlowMap 時自動同步。<br>` +
           `輸入埠沒接線時，使用來源節點輸入自己填的預設值。`}</div>`;
   }
+  // MCP 工具：測試連線。用檢查器裡「目前填的」URL／認證做一次 initialize + tools/list，
+  // 結果只顯示在這裡與執行日誌，不進圖、不存檔；是診斷動作，不受模擬模式影響。
+  if (n.type === 'mcp') {
+    h += `<label>連線檢查</label><div class="btnrow"><button class="mcp-test" title="用上面填的 URL 與認證連一次 MCP 伺服器並列出工具（真的會連線，與模擬模式無關）">🔌 測試連線</button></div>` +
+      `<div class="srcs-empty mcp-test-out"></div>`;
+  }
   // 有 multi 輸入埠的節點：列出已連接的上游節點
   const multiPin = t.inputs.find(p => p.multi);
   if (multiPin) {
@@ -2184,6 +2190,30 @@ function renderInspector() {
       } catch (e) { log('檔案選擇失敗：' + e.message, 'er'); }
       btn.disabled = false; btn.textContent = '📂 瀏覽';
     });
+  });
+  form.querySelector('.mcp-test')?.addEventListener('click', async ev => {
+    const btn = ev.currentTarget, out = form.querySelector('.mcp-test-out');
+    const url = form.querySelector('input[data-pkey="url"]')?.value.trim() || '';
+    const authEnv = form.querySelector('input[data-pkey="authEnv"]')?.value.trim() || '';
+    const show = (msg, color) => { out.textContent = msg; out.style.color = color; };
+    if (!url) return show('✗ 先填 MCP 伺服器 URL', 'var(--red)');
+    btn.disabled = true; btn.textContent = '測試中…'; show('連線中…', '');
+    try {
+      const res = await fetch('/api/mcp', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-wfg-token': API_TOKEN },
+        body: JSON.stringify({ url, list: true, authEnv: authEnv || undefined, timeoutMs: 15000 }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.error) throw new Error(d.error || ('伺服器錯誤 ' + res.status));
+      const tools = (d.result?.tools || []).map(t => t.name);
+      const msg = `✓ 連線成功（${((d.durationMs || 0) / 1000).toFixed(1)}s）：` +
+        (d.server ? d.server.name + (d.server.version ? ' ' + d.server.version : '') : '伺服器未回報名稱') +
+        `，${tools.length} 個工具` + (tools.length ? '：' + tools.slice(0, 12).join('、') + (tools.length > 12 ? '…' : '') : '');
+      show(msg, 'var(--green)'); log(msg, 'ok', 'MCP 測試連線');
+    } catch (e) {
+      show('✗ ' + e.message, 'var(--red)'); log(e.message, 'er', 'MCP 測試連線');
+    }
+    btn.disabled = false; btn.textContent = '🔌 測試連線';
   });
   form.querySelectorAll('[data-pkey]').forEach(el => {
     // 即打即存：input 事件就寫回狀態，避免「打完字沒失焦就執行/匯出」漏存
