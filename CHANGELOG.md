@@ -34,6 +34,19 @@
   `read_console` 讀 Unity Console 的錯誤與警告 → 𝑓 程式碼 轉成 JSON 文字 → ✍ 模板 → 🧠 LLM 整理成摘要。
   前置條件（MCP for Unity 以 HTTP 傳輸啟動、Unity Editor 已連上）寫在範例的註解節點裡。
 
+### 變更
+
+- **AI 節點的工具邊界從黑名單改成白名單**（`server.js` 的 `POLICY` / `policyArgs`）。原本只靠
+  `--disallowedTools` 列舉要拔的工具，Claude Code 新增的 ToolSearch、Skill、Artifact、Cron 等
+  不在清單上，純文字 LLM 節點因此透過 ToolSearch 摸得到 claude.ai 連接器（Google Drive 分享／
+  刪檔、Claude Docs 刪除）與外掛的 MCP 工具，還揹著 84 個 skill 的說明。改成：
+  `--tools <白名單>`（LLM 節點為空＝全關；網路查詢 WebSearch,WebFetch；程式碼查詢 Read,Grep,Glob）
+  ＋ `--strict-mcp-config --mcp-config empty-mcp.json`（MCP 整組拔除），`--disallowedTools` 留作
+  第二道保險。實測（haiku、同一 prompt）純文字呼叫的輸入 token 從 36.6k 降到 3.2k，
+  網路查詢 4.6k、程式碼查詢 5.9k；把 ToolSearch 加進黑名單則反而升到 73.5k，所以不採用。
+  需要支援 `--tools` 的 Claude Code（本機 2.1.304 可用）；Agent SDK 後端同步加了
+  `tools` / `strictMcpConfig` 選項但未實測。
+
 ---
 
 ## 2026-09-07

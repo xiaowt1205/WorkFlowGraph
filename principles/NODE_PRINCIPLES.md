@@ -18,8 +18,13 @@
 ### 2. 能力邊界用機制保證，不靠提示詞
 節點能做什麼、不能做什麼，由**程式碼與呼叫參數**決定，不由 system prompt 決定。
 
-- LLM 節點是純文字進出：後端以 `--disallowedTools` 把 claude 的工具**整組拔除**，模型的世界裡不存在寫檔、執行指令這些選項。
-- 需要特定工具的節點（如網路查詢）以白名單開放（`--allowedTools WebSearch`），其餘照樣拔除。
+- LLM 節點是純文字進出：後端以 `--tools ""` 把 claude 的內建工具**整組關掉**（白名單為空），
+  再以 `--strict-mcp-config` ＋空的 `--mcp-config` 把 claude.ai 連接器與外掛的 MCP 工具也拔掉，
+  模型的世界裡不存在寫檔、執行指令、ToolSearch 這些選項。`--disallowedTools` 黑名單只是第二道保險。
+- 需要特定工具的節點（如網路查詢）以白名單開放（`--tools WebSearch,WebFetch` ＋ `--allowedTools`），其餘照樣不存在。
+- **白名單，不是黑名單。** Claude Code 每版都會新增工具（ToolSearch、Skill、Artifact、Cron…），
+  黑名單一定會過時；2026-10-22 就是這樣破的：純文字節點透過 ToolSearch 摸得到 Google Drive 分享／刪檔。
+  同一天實測：黑名單 36.6k 輸入 token、把 ToolSearch 加進黑名單反而 73.5k、白名單＋空 MCP 設定 3.2k。
 - 提示詞（如「輸出限制」的守則注入）只能作為**品質優化**，之後必須跟一道**強制後處理**（如抽取程式碼區塊）做硬保證。軟約束後面沒有硬保險的設計不予接受。
 
 ### 3. 單一職責

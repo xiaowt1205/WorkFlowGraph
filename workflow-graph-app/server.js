@@ -379,8 +379,10 @@ async function callClaudeSdk({ system, prompt, model, policy, systemMode = 'repl
     const options = {
       abortController: ac,
       includePartialMessages: true,
+      tools: policy?.tools || [],              // 對應 CLI 的 --tools 白名單
       allowedTools: policy?.allowed || [],
       disallowedTools: policy?.disallowed || [],
+      mcpServers: {}, strictMcpConfig: true,   // 對應 --strict-mcp-config 空設定（SDK 路徑未實測：本機未安裝 SDK）
       ...(model ? { model } : {}),
       ...(cwd ? { cwd } : {}),
       ...(resume ? { resume } : {}),
@@ -434,16 +436,27 @@ function normUsage(u) {
   return { in: inTotal, out, fresh, cacheWrite, cacheRead };
 }
 
-/* 工具白/黑名單改成結構化政策（CLI 後端轉成旗標、SDK 後端直接吃陣列）。
-   LLM 節點是純文字進出：把 claude 的工具整組拔掉。
-   模型的工具清單裡沒有 Write/Bash，就不會「想去建檔案」、
-   不會探索目錄、也不會回覆「寫入權限未被授予」——這是機制保證，不靠提示詞。 */
+/* 工具政策（CLI 後端轉成旗標、SDK 後端直接吃陣列）。三個欄位：
+     tools      — 白名單，第一道：--tools 只開這些內建工具（空陣列 → --tools "" 全關），
+                  ToolSearch、Skill、Artifact、Cron… 這些新工具因此根本不存在
+     allowed    — 白名單內要自動核准的工具（--allowedTools）
+     disallowed — 黑名單，第二道保險（--disallowedTools）；舊版 CLI 不認 --tools 時至少還有它
+   另外一律 --strict-mcp-config ＋ 空的 --mcp-config：claude.ai 連接器與外掛的 MCP 工具
+   不受 --tools 管，不拔會讓「純文字」節點透過 ToolSearch 摸到 Google Drive 分享／刪檔。
+   為什麼不是把 ToolSearch 加進黑名單（2026-10-22 實測，haiku、同一 prompt）：
+     舊黑名單                      36.6k 輸入 token，仍看得到連接器與 84 個 skill
+     舊黑名單＋ToolSearch           73.5k（延遲載入的工具 schema 全部被迫內嵌，更糟）
+     --tools "" ＋空 MCP 設定        3.2k，零工具、零 skill
+   模型的工具清單裡沒有 Write/Bash，就不會「想去建檔案」、不會探索目錄、
+   也不會回覆「寫入權限未被授予」——這是機制保證，不靠提示詞。 */
+const EMPTY_MCP_CONFIG = path.join(__dirname, 'empty-mcp.json');   // 內容固定 {"mcpServers":{}}，進版控
 const ALL_TOOLS = 'Bash,Write,Edit,MultiEdit,NotebookEdit,Read,Glob,Grep,LS,WebFetch,WebSearch,Task,TodoWrite,BashOutput,KillShell,SlashCommand,ExitPlanMode'.split(',');
 const POLICY = {
   /* 純文字進出：全拔 */
-  text: { allowed: [], disallowed: ALL_TOOLS },
+  text: { tools: [], allowed: [], disallowed: ALL_TOOLS },
   /* 網路查詢：只留 WebSearch / WebFetch，其餘照樣拔掉 */
   websearch: {
+    tools: ['WebSearch', 'WebFetch'],
     allowed: ['WebSearch', 'WebFetch'],
     disallowed: 'Bash,Write,Edit,MultiEdit,NotebookEdit,Task,TodoWrite,SlashCommand'.split(','),
   },
@@ -451,12 +464,20 @@ const POLICY = {
      範圍限制不在這裡——靠 cwd（Claude Code 的工作區邊界）＋回傳後的引用逐筆驗證
      （見 validateCitations）。沒有 Bash、沒有寫檔、沒有網路。 */
   codequery: {
+    tools: ['Read', 'Grep', 'Glob'],
     allowed: ['Read', 'Grep', 'Glob'],
     disallowed: 'Bash,Write,Edit,MultiEdit,NotebookEdit,LS,WebFetch,WebSearch,Task,TodoWrite,BashOutput,KillShell,SlashCommand,ExitPlanMode'.split(','),
   },
 };
+let warnedMcpCfg = false;
 function policyArgs(p) {
-  const args = [];
+  const args = ['--tools', (p.tools || []).join(',')];   // 空陣列 → ""：走 shell 時 shellQuoteArg 會包成 ""
+  if (IS_WIN && WIN_UNSAFE_PATH.test(EMPTY_MCP_CONFIG)) {
+    // 路徑含 " 或 % 就無法安全進 cmd.exe 命令列（見「命令列安全」）；寧可少一道也不硬拼
+    if (!warnedMcpCfg) { warnedMcpCfg = true; console.warn('[policy] 程式目錄路徑含 " 或 %，無法傳 --mcp-config，MCP 工具不會被拔除：' + EMPTY_MCP_CONFIG); }
+  } else {
+    args.push('--strict-mcp-config', '--mcp-config', EMPTY_MCP_CONFIG);
+  }
   for (const t of p.allowed || []) args.push('--allowedTools', t);
   if (p.disallowed?.length) args.push('--disallowedTools', p.disallowed.join(','));
   return args;

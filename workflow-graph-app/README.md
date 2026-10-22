@@ -134,7 +134,7 @@ server.js（Node 內建 http，零依賴）
 | API | 用途 |
 |---|---|
 | `GET /api/health` | 偵測本機 claude 版本（30 秒快取） |
-| `POST /api/llm` | 純文字補全；呼叫時以 `--disallowedTools` **拔除全部工具**，模型只能回文字；cwd 錨定在空白暫存目錄（不吸附任何專案的 CLAUDE.md）；預設硬上限 900s |
+| `POST /api/llm` | 純文字補全；呼叫時以 `--tools ""` ＋ `--strict-mcp-config` 空設定**關掉全部工具與 MCP**（白名單制，`--disallowedTools` 為第二道保險），模型只能回文字；cwd 錨定在空白暫存目錄（不吸附任何專案的 CLAUDE.md）；預設硬上限 900s |
 | `POST /api/websearch` | 白名單開放 WebSearch / WebFetch，其餘工具拔除；預設硬上限 900s |
 | `POST /api/codequery` | 白名單只留唯讀三件組（Read / Grep / Glob），其餘拔除；`cwd` 錨定在查詢起點資料夾，**範圍語意＝整個 repo**（起點為主、同 repo 檔案可讀——「正名 repo root」決議，起點與 repo 根都注入提示）；`檔案:行號` 引用**雙基準逐筆驗證**（起點相對→repo 根相對，repo 之外一律無效，回應含 `rebased` 筆數）；預設硬上限 1800s |
 | `/api/version-anchor`（GET `?path=…` 或 POST） | 確定性計算版本錨點：git 專案回 commit＋日期＋dirty，非 git 逐檔 sha256（格式同 version-anchor.json）；不經 LLM |
