@@ -29,6 +29,10 @@
   做一次 initialize ＋ tools/list，成功顯示伺服器名稱、版本與工具名稱清單，失敗顯示原因
   （連不上、HTTP 狀態碼、環境變數沒值、逾時 15s）。結果只顯示在檢查器與執行日誌，不進圖、
   不存檔；它是診斷動作，**不受模擬模式影響**（真的會連線）。
+- **內建範例 ⑦ Unity MCP**：示範用 🔌 MCP 工具 接 MCP for Unity 的 Streamable HTTP 端點
+  （預設 `http://127.0.0.1:8080/mcp`）——一顆留空工具名稱列出 Unity 工具清單，另一條鏈用
+  `read_console` 讀 Unity Console 的錯誤與警告 → 𝑓 程式碼 轉成 JSON 文字 → ✍ 模板 → 🧠 LLM 整理成摘要。
+  前置條件（MCP for Unity 以 HTTP 傳輸啟動、Unity Editor 已連上）寫在範例的註解節點裡。
 
 ---
 

@@ -2716,6 +2716,23 @@ const Examples = [
       ['mg.out', 'llm.prompt'], ['llm.out', 'fo.content'], ['fo.out', 'out.value'],
     ]),
   },
+  {
+    name: '⑦ Unity MCP（MCP 工具 → 讀 Unity Console → LLM 整理）',
+    build: () => G([
+      ['note', 'note', 30, -120, { text: '前置：MCP for Unity 以 HTTP 傳輸啟動（預設 http://127.0.0.1:8080/mcp），且 Unity Editor 已連上它。先點「列出 Unity 工具」節點，按檢查器的「🔌 測試連線」確認通了再執行。同時開著多個 Unity 時，參數加 "unity_instance":"專案名@hash" 指定要哪一個。' }],
+      ['list', 'mcp', 30, 60, { url: 'http://127.0.0.1:8080/mcp', tool: '', _label: '列出 Unity 工具' }],
+      ['lout', 'output', 330, 60, { name: '工具清單' }],
+      ['args', 'input', 30, 300, { value: '{"action":"get","types":["error","warning"],"count":20}', _label: '讀取參數' }],
+      ['con', 'mcp', 330, 300, { url: 'http://127.0.0.1:8080/mcp', tool: 'read_console', _label: '讀 Unity Console' }],
+      ['txt', 'code', 620, 300, { code: '// MCP 工具回的是物件（structuredContent），模板節點只吃文字 → 先轉成 JSON 字串\nreturn typeof a === \'string\' ? a : JSON.stringify(a, null, 2);', _label: '轉成文字' }],
+      ['tpl', 'template', 880, 300, { template: '以下是 Unity Editor Console 最近的錯誤與警告（JSON）。請依訊息分組、各給一句可能原因與下一步，最後列出最該先處理的一項：\n\n@轉成文字' }],
+      ['llm', 'llm', 1140, 300, { system: '你是 Unity 開發助理，回答精簡、條列。', model: 'haiku', _label: '整理錯誤' }],
+      ['out', 'output', 1400, 300, { name: '錯誤摘要' }],
+    ], [
+      ['list.out', 'lout.value'],
+      ['args.out', 'con.args'], ['con.out', 'txt.a'], ['txt.out', 'tpl.in'], ['tpl.out', 'llm.prompt'], ['llm.out', 'out.value'],
+    ]),
+  },
 ];
 
 /* ---------- FlowMap / Project ----------
