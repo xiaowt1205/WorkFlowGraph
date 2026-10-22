@@ -1689,93 +1689,6 @@ async function aiEndpoint(req, res, tag, body, { defTimeoutMs, buildOpts, logLin
   }
 }
 
-/* ---------- MCP client（Streamable HTTP 傳輸，不經 Claude） ----------
-   節點「🔌 MCP 工具」的後端：initialize → notifications/initialized → tools/call（或 tools/list），
-   JSON-RPC 走 POST，回應可能是 application/json 或 text/event-stream（SSE），兩種都收。
-   只做 Streamable HTTP：舊版 HTTP+SSE（GET /sse 拿 endpoint）與 stdio 不做——stdio 等於
-   在本機 spawn 指令，風險等級同 Shell 節點，要做必須套同樣的三道閘門。
-   認證：節點只填環境變數「名稱」，值在這裡才解析，圖裡永遠不會有金鑰。
-   ponytail: 只支援 Authorization: Bearer；要自訂標頭名再加參數。 */
-const MCP_PROTOCOL = '2025-06-18';
-const MCP_BODY_LIMIT = 8 * 1024 * 1024;
-
-/* 讀回應：JSON 直接 parse；SSE 逐事件解析，拿到 id 相符的訊息就停（不等伺服器關流）。 */
-async function mcpReadResponse(res, wantId) {
-  const ct = String(res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-  if (ct === 'application/json') {
-    const text = await res.text();
-    if (text.length > MCP_BODY_LIMIT) throw new Error('MCP 回應超過 8MB');
-    return JSON.parse(text);
-  }
-  if (ct !== 'text/event-stream') {
-    const text = await res.text().catch(() => '');
-    throw new Error(`MCP 伺服器回了非預期的 Content-Type「${ct || '(空)'}」：${text.slice(0, 200)}`);
-  }
-  let buf = '', size = 0;
-  const dec = new TextDecoder();
-  for await (const chunk of res.body) {
-    size += chunk.length;
-    if (size > MCP_BODY_LIMIT) throw new Error('MCP SSE 串流超過 8MB');
-    buf += dec.decode(chunk, { stream: true });
-    let sep;
-    while ((sep = buf.search(/\r?\n\r?\n/)) !== -1) {
-      const raw = buf.slice(0, sep); buf = buf.slice(sep).replace(/^\r?\n\r?\n/, '');
-      const data = raw.split(/\r?\n/).filter(l => l.startsWith('data:')).map(l => l.slice(5).replace(/^ /, '')).join('\n');
-      if (!data) continue;
-      let msg; try { msg = JSON.parse(data); } catch { continue; }
-      if (msg && msg.id === wantId) { try { await res.body.cancel?.(); } catch {} return msg; }
-    }
-  }
-  throw new Error('MCP SSE 串流結束了，但沒有收到對應的回應');
-}
-
-async function mcpCall({ url, tool, args, authEnv, list, timeoutMs }) {
-  if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('MCP 伺服器 URL 必須是 http:// 或 https:// 開頭');
-  const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' };
-  if (authEnv) {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(authEnv)) throw new Error(`環境變數名稱不合法：${String(authEnv).slice(0, 40)}`);
-    const v = process.env[authEnv];
-    if (!v) throw new Error(`環境變數 ${authEnv} 沒有值（在啟動伺服器的環境設定它，圖裡只放名稱）`);
-    headers['Authorization'] = 'Bearer ' + v;
-  }
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  let nextId = 1, sessionId = null;
-  const post = async (msg) => {
-    const h = { ...headers };
-    if (sessionId) h['Mcp-Session-Id'] = sessionId;
-    if (msg.method !== 'initialize') h['MCP-Protocol-Version'] = MCP_PROTOCOL;
-    const res = await fetch(url, { method: 'POST', headers: h, body: JSON.stringify(msg), signal: ac.signal });
-    const sid = res.headers.get('mcp-session-id');
-    if (sid) sessionId = sid;
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`MCP 伺服器回 HTTP ${res.status}（${msg.method}）：${text.slice(0, 200)}`);
-    }
-    if (msg.id === undefined) { await res.text().catch(() => ''); return null; }   // 通知：只看狀態碼
-    const reply = await mcpReadResponse(res, msg.id);
-    if (reply.error) throw new Error(`MCP 錯誤 ${reply.error.code ?? ''}（${msg.method}）：${reply.error.message || JSON.stringify(reply.error).slice(0, 200)}`);
-    return reply.result;
-  };
-  const t0 = Date.now();
-  try {
-    const init = await post({ jsonrpc: '2.0', id: nextId++, method: 'initialize', params: {
-      protocolVersion: MCP_PROTOCOL, capabilities: {}, clientInfo: { name: 'WorkFlowGraph', version: '0.2.0' } } });
-    await post({ jsonrpc: '2.0', method: 'notifications/initialized' });
-    const result = list
-      ? await post({ jsonrpc: '2.0', id: nextId++, method: 'tools/list', params: {} })
-      : await post({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: { name: tool, arguments: args || {} } });
-    if (sessionId) {   // 盡力關閉會話；伺服器不支援（405）就算了
-      fetch(url, { method: 'DELETE', headers: { ...headers, 'Mcp-Session-Id': sessionId, 'MCP-Protocol-Version': MCP_PROTOCOL } }).catch(() => {});
-    }
-    return { result, server: init?.serverInfo || null, sessionId, durationMs: Date.now() - t0 };
-  } catch (e) {
-    if (ac.signal.aborted) throw new Error(`MCP 呼叫超過逾時（${Math.round(timeoutMs / 1000)}s）`);
-    if (e.cause?.code) throw new Error(`連不上 MCP 伺服器：${e.cause.code}（${url}）`);
-    throw e;
-  } finally { clearTimeout(timer); }
-}
-
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
 
@@ -2041,29 +1954,10 @@ const server = http.createServer(async (req, res) => {
   /* 本機已設定給 Claude Code 的 MCP 伺服器清單，給 MCP 代理節點的「從 Claude Code 設定帶入」選單。
      來源：~/.claude.json 的 mcpServers（使用者層）、projects[*].mcpServers（專案層）、各專案根的 .mcp.json。
      只供頁面複製：圖裡存的是副本，執行時不會回頭讀這些檔案（圖才能跨機器分享）。
-     設定可能含 env／headers 金鑰，所以比照 /api/mcp 要求啟動權杖。 */
+     設定可能含 env／headers 金鑰，所以比照 /api/mcpagent 要求啟動權杖。 */
   if (url.pathname === '/api/mcp/known' && req.method === 'GET') {
     if (req.headers['x-wfg-token'] !== API_TOKEN) return json(res, 403, { error: '需要本次啟動的權杖——請重新整理頁面後再試' });
     return json(res, 200, { list: knownMcpServers() });
-  }
-
-  if (url.pathname === '/api/mcp' && req.method === 'POST') {
-    try {
-      // 伺服器替頁面對外發請求：比照 /api/shell 要求本次啟動的權杖
-      if (req.headers['x-wfg-token'] !== API_TOKEN)
-        return json(res, 403, { error: 'MCP 端點需要本次啟動的權杖——請重新整理頁面後再試' });
-      const body = JSON.parse(await readBody(req, 8 * 1024 * 1024) || '{}');
-      if (!body.url) return json(res, 400, { error: '缺少 url' });
-      if (!body.list && !body.tool) return json(res, 400, { error: '缺少 tool' });
-      const timeoutMs = clampTimeout(body.timeoutMs, 60000);
-      console.log(`[mcp] → ${body.list ? 'tools/list' : 'tools/call ' + body.tool} @ ${body.url}`);
-      const r = await mcpCall({ ...body, timeoutMs });
-      console.log(`[mcp] ← ${(r.durationMs / 1000).toFixed(1)}s${r.server ? ' ' + r.server.name : ''}${r.result?.isError ? ' isError' : ''}`);
-      return json(res, 200, r);
-    } catch (e) {
-      console.error('[mcp] 錯誤：' + e.message);
-      return json(res, 500, { error: e.message });
-    }
   }
 
   if (url.pathname === '/api/writefile' && req.method === 'POST') {

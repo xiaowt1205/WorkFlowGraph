@@ -12,7 +12,7 @@
   --accent:#5b8cff; --green:#3ecf8e; --red:#ff6b6b; --amber:#ffb02e;
   --node-bg:#1b2338; --node-head:#222c47;
   --c-input:#3ecf8e; --c-template:#b78bff; --c-llm:#5b8cff; --c-code:#ffb02e;
-  --c-http:#4dd0e1; --c-web:#2fd3b5; --c-filein:#9ccc65; --c-fileout:#f06eaa; --c-condition:#ff8a5c; --c-merge:#9aa7c7; --c-output:#ff6b9d; --c-note:#6b7694; --c-subflow:#ffe066; --c-modin:#c3e653; --c-modout:#e0995e; --c-codequery:#c86bfa; --c-folderlink:#c9b458; --c-shell:#eef2ff; --c-mcp:#6ea8fe; --c-mcpagent:#b39dff;
+  --c-http:#4dd0e1; --c-web:#2fd3b5; --c-filein:#9ccc65; --c-fileout:#f06eaa; --c-condition:#ff8a5c; --c-merge:#9aa7c7; --c-output:#ff6b9d; --c-note:#6b7694; --c-subflow:#ffe066; --c-modin:#c3e653; --c-modout:#e0995e; --c-codequery:#c86bfa; --c-folderlink:#c9b458; --c-shell:#eef2ff; --c-mcpagent:#b39dff;
   --radius:10px;
   font-size:14px;
 }
@@ -872,66 +872,6 @@ const NodeTypes = {
       try { return { out: JSON.parse(text) }; } catch { return { out: text }; }
     }
   },
-  mcp: {
-    title: 'MCP 工具', color: 'var(--c-mcp)', icon: '🔌',
-    inputs: [{ name: 'args', label: '工具參數（JSON 物件；接線優先於下方參數）' }],
-    outputs: [{ name: 'out', label: '結果' }],
-    params: [
-      { key: 'url', label: 'MCP 伺服器 URL（Streamable HTTP，例：http://localhost:3001/mcp）', kind: 'text', def: '' },
-      { key: 'tool', label: '工具名稱（留空＝回傳伺服器的工具清單，方便先查名稱）', kind: 'text', def: '' },
-      { key: 'args', label: '工具參數（JSON 物件；args 埠接了線就不用這裡）', kind: 'textarea', def: '' },
-      { key: 'authEnv', label: '認證：環境變數名稱（伺服器端以 Authorization: Bearer 送出；留空＝不認證。圖裡只存名稱，不存金鑰）', kind: 'text', def: '' },
-      { key: 'timeout', label: '逾時（秒；0＝預設 60s，最少 10s）', kind: 'number', def: 0, min: 0, step: 10 },
-    ],
-    summary: n => (n.params.tool ? n.params.tool : '（列出工具清單）') + '\n@ ' + clip(n.params.url || '（未設定 URL）', 44),
-    /* 不經 Claude 的確定性呼叫：initialize → tools/call 由後端 /api/mcp 完成（瀏覽器直打會被 CORS 擋）。
-       沒有「URL／工具名稱」輸入埠：上游只能提供參數，呼叫哪台、哪個工具由圖的作者決定（同 Shell 節點的理由）。
-       工具回 isError 視為節點錯誤（拋出），不另開 fail 埠。 */
-    async run(ctx) {
-      const url = String(ctx.params.url ?? '').trim();
-      const tool = String(ctx.params.tool ?? '').trim();
-      if (!url) throw new Error('未設定 MCP 伺服器 URL（在右側檢查器填入）');
-      let args = {};
-      const wired = Object.prototype.hasOwnProperty.call(ctx.inputs, 'args');
-      const rawArgs = wired ? ctx.inputs.args : ctx.params.args;
-      if (wired) ctx.log('工具參數：使用 args 埠接線的值（檢查器的參數欄不生效）');
-      if (rawArgs !== undefined && rawArgs !== null && String(rawArgs).trim() !== '') {
-        if (typeof rawArgs === 'object') args = rawArgs;
-        else { try { args = JSON.parse(rawArgs); } catch (e) { throw new Error('工具參數不是合法 JSON：' + e.message); } }
-        if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('工具參數必須是 JSON 物件（{ ... }），不能是陣列或純值');
-      }
-      if (!tool) ctx.log('未填工具名稱 → 改呼叫 tools/list，輸出工具清單');
-      if (state.simulate) {
-        await sleep(300);
-        ctx.log('模擬模式：不連線 MCP 伺服器');
-        return { out: JSON.stringify({ simulated: true, url, tool: tool || '(tools/list)', args }, null, 2) };
-      }
-      const secs = Math.max(0, Number(ctx.params.timeout) || 0);
-      const res = await fetch('/api/mcp', {
-        signal: ctx.signal, method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-wfg-token': API_TOKEN },
-        body: JSON.stringify({ url, tool, args, list: !tool, authEnv: String(ctx.params.authEnv ?? '').trim() || undefined,
-          timeoutMs: secs > 0 ? Math.max(10, secs) * 1000 : undefined }),   // 後端 clampTimeout 最少 10s，低於就會默默退回預設
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok || d.error) throw new Error(d.error || ('伺服器錯誤 ' + res.status));
-      ctx.log(`完成，${((d.durationMs || 0) / 1000).toFixed(1)}s${d.server ? '（伺服器：' + d.server.name + (d.server.version ? ' ' + d.server.version : '') + '）' : ''}`);
-      const r = d.result || {};
-      if (!tool) {
-        const tools = r.tools || [];
-        ctx.log(`伺服器提供 ${tools.length} 個工具`);
-        return { out: tools.map(t => t.name + (t.description ? ' — ' + t.description : '') + (t.inputSchema ? '\n  參數：' + JSON.stringify(t.inputSchema.properties || {}) : '')).join('\n') || '（伺服器沒有任何工具）' };
-      }
-      const content = Array.isArray(r.content) ? r.content : [];
-      const text = content.filter(c => c.type === 'text').map(c => c.text).join('\n');
-      if (r.isError) throw new Error('工具回報錯誤：' + (text || JSON.stringify(content).slice(0, 300)));
-      if (r.structuredContent !== undefined) { ctx.log('工具回了 structuredContent → 以它為輸出（content 文字忽略）'); return { out: r.structuredContent }; }
-      if (content.length && content.length !== content.filter(c => c.type === 'text').length)
-        ctx.log(`content 含非文字項目（${content.filter(c => c.type !== 'text').map(c => c.type).join('、')}）→ 以整個 content 陣列輸出`);
-      if (content.length && content.every(c => c.type === 'text')) return { out: text };
-      return { out: content };
-    }
-  },
   mcpagent: {
     title: 'MCP 代理', color: 'var(--c-mcpagent)', icon: '🤖',
     inputs: [{ name: 'prompt', label: '任務（給 Claude 的提示）' }],
@@ -953,8 +893,9 @@ const NodeTypes = {
             ? names.map(k => k + (p.servers[k]?.command ? '（stdio）' : '（HTTP）')).join('、') : '（未設定 MCP 伺服器）')
         + '\n本地 Claude（' + modelLabel(n) + '）';
     },
-    /* 與 🔌 MCP 工具 的分工：那顆是確定性的「呼叫某個工具」，這顆是「把這幾台 MCP 的工具交給 Claude，
-       讓它自己決定呼叫哪些、幾次」。邊界靠後端旗標：--tools "" 全關內建工具、--strict-mcp-config 只載入
+    /* 「把這幾台 MCP 的工具交給 Claude，讓它自己決定呼叫哪些、幾次」。要確定性地只呼叫某一個工具，
+       任務寫成「呼叫 X 工具、參數如下、原樣回傳結果」即可（原本另有一顆不經 Claude 的 MCP 工具節點，
+       因只支援 HTTP 且職責重疊，2026-10-22 移除）。邊界靠後端旗標：--tools "" 全關內建工具、--strict-mcp-config 只載入
        節點填的伺服器、--allowedTools mcp__<名稱>。stdio 型伺服器會在這台機器啟動指令，閘門比照 Shell 節點：
        ① 模擬模式不呼叫 ② 工具列「允許 Shell」③ 每份新設定首次執行先確認。HTTP 型不需要這些閘門。 */
     async run(ctx) {
@@ -1371,6 +1312,7 @@ function cleanNode(n) {
   return n;
 }
 function loadedGraph(g) {
+  g = migrateRemovedTypes(g);
   const nodes = (g.nodes || []).map(cleanNode);
   // Workspace 時代的舊欄位遷移：subflow 的 wsId → fmId、_wsName → _fmName
   for (const n of nodes) {
@@ -1379,6 +1321,32 @@ function loadedGraph(g) {
     if (n.params._wsName && !n.params._fmName) { n.params._fmName = n.params._wsName; delete n.params._wsName; }
   }
   return { nodes, edges: (g.edges || []).map(cleanEdge) };
+}
+
+/* 已移除的節點型別：載入舊圖時刪掉節點、把前後連線橋接，並在日誌講清楚（NODE_PRINCIPLES 八、相容性義務）。
+   mcp（🔌 MCP 工具，2026-10-22 移除）：args 埠的上游直接接到 out 埠的下游；改用 🤖 MCP 代理。 */
+const REMOVED_TYPES = {
+  mcp: { title: 'MCP 工具', hint: '改用 🤖 MCP 代理：MCP 設定填同一個 URL，任務寫「呼叫 <工具名> 工具、參數如下、原樣回傳結果」' },
+};
+function migrateRemovedTypes(g) {
+  const nodes = Array.isArray(g?.nodes) ? g.nodes : [];
+  const gone = nodes.filter(x => REMOVED_TYPES[x.type]);
+  if (!gone.length) return g;
+  let edges = Array.isArray(g.edges) ? g.edges.slice() : [];
+  for (const n of gone) {
+    const ins = edges.filter(e => e.to?.node === n.id);
+    const outs = edges.filter(e => e.from?.node === n.id);
+    for (const i of ins) for (const o of outs)
+      edges.push({ id: 'n' + Math.random().toString(36).slice(2, 9), from: i.from, to: o.to });
+    edges = edges.filter(e => e.from?.node !== n.id && e.to?.node !== n.id);
+    const r = REMOVED_TYPES[n.type];
+    const what = n.params?.tool ? `工具 ${n.params.tool}` : '（列出工具清單）';
+    const where = n.params?.url ? ` @ ${n.params.url}` : '';
+    if (typeof log === 'function')
+      log(`⚠ 節點「${n.params?._label || r.title}」（${r.title}，${what}${where}）已從圖中移除：此節點型別已不存在。` +
+          `前後連線已直接橋接（${ins.length} 進 → ${outs.length} 出）。${r.hint}`, 'wr');
+  }
+  return { ...g, nodes: nodes.filter(x => !REMOVED_TYPES[x.type]), edges };
 }
 
 function snapshot() { return JSON.stringify(graphData()); }
@@ -2168,12 +2136,6 @@ function renderInspector() {
           `執行時載入來源<b>最後儲存的版本</b>；埠定義在開啟本 FlowMap 時自動同步。<br>` +
           `輸入埠沒接線時，使用來源節點輸入自己填的預設值。`}</div>`;
   }
-  // MCP 工具：測試連線。用檢查器裡「目前填的」URL／認證做一次 initialize + tools/list，
-  // 結果只顯示在這裡與執行日誌，不進圖、不存檔；是診斷動作，不受模擬模式影響。
-  if (n.type === 'mcp') {
-    h += `<label>連線檢查</label><div class="btnrow"><button class="mcp-test" title="用上面填的 URL 與認證連一次 MCP 伺服器並列出工具（真的會連線，與模擬模式無關）">🔌 測試連線</button></div>` +
-      `<div class="srcs-empty mcp-test-out"></div>`;
-  }
   // 有 multi 輸入埠的節點：列出已連接的上游節點
   const multiPin = t.inputs.find(p => p.multi);
   if (multiPin) {
@@ -2269,30 +2231,6 @@ function renderInspector() {
       } catch (e) { log('檔案選擇失敗：' + e.message, 'er'); }
       btn.disabled = false; btn.textContent = '📂 瀏覽';
     });
-  });
-  form.querySelector('.mcp-test')?.addEventListener('click', async ev => {
-    const btn = ev.currentTarget, out = form.querySelector('.mcp-test-out');
-    const url = form.querySelector('input[data-pkey="url"]')?.value.trim() || '';
-    const authEnv = form.querySelector('input[data-pkey="authEnv"]')?.value.trim() || '';
-    const show = (msg, color) => { out.textContent = msg; out.style.color = color; };
-    if (!url) return show('✗ 先填 MCP 伺服器 URL', 'var(--red)');
-    btn.disabled = true; btn.textContent = '測試中…'; show('連線中…', '');
-    try {
-      const res = await fetch('/api/mcp', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-wfg-token': API_TOKEN },
-        body: JSON.stringify({ url, list: true, authEnv: authEnv || undefined, timeoutMs: 15000 }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok || d.error) throw new Error(d.error || ('伺服器錯誤 ' + res.status));
-      const tools = (d.result?.tools || []).map(t => t.name);
-      const msg = `✓ 連線成功（${((d.durationMs || 0) / 1000).toFixed(1)}s）：` +
-        (d.server ? d.server.name + (d.server.version ? ' ' + d.server.version : '') : '伺服器未回報名稱') +
-        `，${tools.length} 個工具` + (tools.length ? '：' + tools.slice(0, 12).join('、') + (tools.length > 12 ? '…' : '') : '');
-      show(msg, 'var(--green)'); log(msg, 'ok', 'MCP 測試連線');
-    } catch (e) {
-      show('✗ ' + e.message, 'var(--red)'); log(e.message, 'er', 'MCP 測試連線');
-    }
-    btn.disabled = false; btn.textContent = '🔌 測試連線';
   });
   const known = form.querySelector('.mcp-known');
   if (known) {
@@ -2709,7 +2647,7 @@ function importJSON(text) {
     state.nodes = clean.nodes; state.edges = clean.edges;
     setSelection(null); state.results = {}; updateUsageTotal(null);
     renderAll();
-    log(`已匯入：${g.nodes.length} 個節點、${g.edges.length} 條連線`, 'ok');
+    log(`已匯入：${clean.nodes.length} 個節點、${clean.edges.length} 條連線`, 'ok');   // 用遷移後的數字，不然移除了節點還報舊數
   } catch (e) { log('匯入失敗：' + e.message, 'er'); }
 }
 
@@ -2818,7 +2756,7 @@ const Examples = [
   {
     name: '⑦ Unity MCP（MCP 代理：Claude 帶 Unity 工具讀 Console）',
     build: () => G([
-      ['note', 'note', 30, -110, { text: '前置：裝好 MCP for Unity（CoplayDev/unity-mcp，需要 uv），Unity Editor 開著。這顆以 stdio 啟動 MCP 伺服器，要先打開工具列的「允許 Shell」，首次執行會再確認一次。同時開著多個 Unity 時，在任務裡寫明要哪個專案。費用提醒：MCP for Unity 有 29 個工具、schema 很大，每一輪約 6 萬輸入 token（實測一次 2 輪＝13.8 萬），所以這裡預設 sonnet；只要單純呼叫某個工具、不想花 token，改用 🔌 MCP 工具（HTTP 傳輸）。' }],
+      ['note', 'note', 30, -110, { text: '前置：裝好 MCP for Unity（CoplayDev/unity-mcp，需要 uv），Unity Editor 開著。這顆以 stdio 啟動 MCP 伺服器，要先打開工具列的「允許 Shell」，首次執行會再確認一次。同時開著多個 Unity 時，在任務裡寫明要哪個專案。費用提醒：MCP for Unity 有 29 個工具、schema 很大，每一輪約 6 萬輸入 token（實測一次 2 輪＝13.8 萬），所以這裡預設 sonnet。' }],
       ['task', 'input', 30, 120, { value: '讀取 Unity Console 最近 20 筆錯誤與警告，依訊息分組，各給一句可能原因與下一步，最後列出最該先處理的一項。沒有任何錯誤或警告就直接說沒有。', _label: '任務' }],
       ['agent', 'mcpagent', 330, 120, { mcp: '{"command":"uvx","args":["--from","mcpforunityserver==10.3.0","mcp-for-unity"]}', model: 'sonnet', _label: 'Unity MCP 代理' }],
       ['out', 'output', 660, 120, { name: '錯誤摘要' }],

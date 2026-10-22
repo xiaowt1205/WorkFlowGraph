@@ -68,6 +68,16 @@
   3.2k 再降到 1.1k token，與 Agent SDK 後端的 settingSources 空值一致。登入憑證不在 settings 裡，
   不受影響；managed settings 仍生效。
 
+### 移除
+
+- **🔌 MCP 工具 節點移除，只留 🤖 MCP 代理**（同日新增、同日移除，依使用者要求只留一種）。
+  兩顆的差別：MCP 工具 是不經 Claude、確定性地呼叫指定工具，但只支援 Streamable HTTP；
+  MCP 代理 任何傳輸都能接（Unity MCP 走 stdio 就只有它接得到），代理也做得到「呼叫 X 工具、
+  原樣回傳」。一併移除檢查器的「測試連線」按鈕與後端 `/api/mcp` 端點（`mcpCall`）；
+  `/api/mcp/known` 保留給帶入選單。**匯入遷移**：舊圖裡的 MCP 工具 節點在載入時刪除、
+  前後連線橋接（args 埠的上游直接接到 out 埠的下游），並在日誌列出被移除的節點與建議改法
+  （`migrateRemovedTypes`，由 `loadedGraph` 呼叫，匯入 JSON 與開啟 FlowMap 兩條路徑都會經過）。
+
 ---
 
 ## 2026-09-07
