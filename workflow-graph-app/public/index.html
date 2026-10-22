@@ -12,7 +12,7 @@
   --accent:#5b8cff; --green:#3ecf8e; --red:#ff6b6b; --amber:#ffb02e;
   --node-bg:#1b2338; --node-head:#222c47;
   --c-input:#3ecf8e; --c-template:#b78bff; --c-llm:#5b8cff; --c-code:#ffb02e;
-  --c-http:#4dd0e1; --c-web:#2fd3b5; --c-filein:#9ccc65; --c-fileout:#f06eaa; --c-condition:#ff8a5c; --c-merge:#9aa7c7; --c-output:#ff6b9d; --c-note:#6b7694; --c-subflow:#ffe066; --c-modin:#c3e653; --c-modout:#e0995e; --c-codequery:#c86bfa; --c-folderlink:#c9b458; --c-shell:#eef2ff;
+  --c-http:#4dd0e1; --c-web:#2fd3b5; --c-filein:#9ccc65; --c-fileout:#f06eaa; --c-condition:#ff8a5c; --c-merge:#9aa7c7; --c-output:#ff6b9d; --c-note:#6b7694; --c-subflow:#ffe066; --c-modin:#c3e653; --c-modout:#e0995e; --c-codequery:#c86bfa; --c-folderlink:#c9b458; --c-shell:#eef2ff; --c-mcp:#6ea8fe;
   --radius:10px;
   font-size:14px;
 }
@@ -859,6 +859,66 @@ const NodeTypes = {
       const res = await fetch(ctx.params.url, opt);
       const text = await res.text();
       try { return { out: JSON.parse(text) }; } catch { return { out: text }; }
+    }
+  },
+  mcp: {
+    title: 'MCP 工具', color: 'var(--c-mcp)', icon: '🔌',
+    inputs: [{ name: 'args', label: '工具參數（JSON 物件；接線優先於下方參數）' }],
+    outputs: [{ name: 'out', label: '結果' }],
+    params: [
+      { key: 'url', label: 'MCP 伺服器 URL（Streamable HTTP，例：http://localhost:3001/mcp）', kind: 'text', def: '' },
+      { key: 'tool', label: '工具名稱（留空＝回傳伺服器的工具清單，方便先查名稱）', kind: 'text', def: '' },
+      { key: 'args', label: '工具參數（JSON 物件；args 埠接了線就不用這裡）', kind: 'textarea', def: '' },
+      { key: 'authEnv', label: '認證：環境變數名稱（伺服器端以 Authorization: Bearer 送出；留空＝不認證。圖裡只存名稱，不存金鑰）', kind: 'text', def: '' },
+      { key: 'timeout', label: '逾時（秒；0＝預設 60s，最少 10s）', kind: 'number', def: 0, min: 0, step: 10 },
+    ],
+    summary: n => (n.params.tool ? n.params.tool : '（列出工具清單）') + '\n@ ' + clip(n.params.url || '（未設定 URL）', 44),
+    /* 不經 Claude 的確定性呼叫：initialize → tools/call 由後端 /api/mcp 完成（瀏覽器直打會被 CORS 擋）。
+       沒有「URL／工具名稱」輸入埠：上游只能提供參數，呼叫哪台、哪個工具由圖的作者決定（同 Shell 節點的理由）。
+       工具回 isError 視為節點錯誤（拋出），不另開 fail 埠。 */
+    async run(ctx) {
+      const url = String(ctx.params.url ?? '').trim();
+      const tool = String(ctx.params.tool ?? '').trim();
+      if (!url) throw new Error('未設定 MCP 伺服器 URL（在右側檢查器填入）');
+      let args = {};
+      const wired = Object.prototype.hasOwnProperty.call(ctx.inputs, 'args');
+      const rawArgs = wired ? ctx.inputs.args : ctx.params.args;
+      if (wired) ctx.log('工具參數：使用 args 埠接線的值（檢查器的參數欄不生效）');
+      if (rawArgs !== undefined && rawArgs !== null && String(rawArgs).trim() !== '') {
+        if (typeof rawArgs === 'object') args = rawArgs;
+        else { try { args = JSON.parse(rawArgs); } catch (e) { throw new Error('工具參數不是合法 JSON：' + e.message); } }
+        if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('工具參數必須是 JSON 物件（{ ... }），不能是陣列或純值');
+      }
+      if (!tool) ctx.log('未填工具名稱 → 改呼叫 tools/list，輸出工具清單');
+      if (state.simulate) {
+        await sleep(300);
+        ctx.log('模擬模式：不連線 MCP 伺服器');
+        return { out: JSON.stringify({ simulated: true, url, tool: tool || '(tools/list)', args }, null, 2) };
+      }
+      const secs = Math.max(0, Number(ctx.params.timeout) || 0);
+      const res = await fetch('/api/mcp', {
+        signal: ctx.signal, method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-wfg-token': API_TOKEN },
+        body: JSON.stringify({ url, tool, args, list: !tool, authEnv: String(ctx.params.authEnv ?? '').trim() || undefined,
+          timeoutMs: secs > 0 ? Math.max(10, secs) * 1000 : undefined }),   // 後端 clampTimeout 最少 10s，低於就會默默退回預設
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.error) throw new Error(d.error || ('伺服器錯誤 ' + res.status));
+      ctx.log(`完成，${((d.durationMs || 0) / 1000).toFixed(1)}s${d.server ? '（伺服器：' + d.server.name + (d.server.version ? ' ' + d.server.version : '') + '）' : ''}`);
+      const r = d.result || {};
+      if (!tool) {
+        const tools = r.tools || [];
+        ctx.log(`伺服器提供 ${tools.length} 個工具`);
+        return { out: tools.map(t => t.name + (t.description ? ' — ' + t.description : '') + (t.inputSchema ? '\n  參數：' + JSON.stringify(t.inputSchema.properties || {}) : '')).join('\n') || '（伺服器沒有任何工具）' };
+      }
+      const content = Array.isArray(r.content) ? r.content : [];
+      const text = content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+      if (r.isError) throw new Error('工具回報錯誤：' + (text || JSON.stringify(content).slice(0, 300)));
+      if (r.structuredContent !== undefined) { ctx.log('工具回了 structuredContent → 以它為輸出（content 文字忽略）'); return { out: r.structuredContent }; }
+      if (content.length && content.length !== content.filter(c => c.type === 'text').length)
+        ctx.log(`content 含非文字項目（${content.filter(c => c.type !== 'text').map(c => c.type).join('、')}）→ 以整個 content 陣列輸出`);
+      if (content.length && content.every(c => c.type === 'text')) return { out: text };
+      return { out: content };
     }
   },
   websearch: {

@@ -7,6 +7,27 @@
 
 ---
 
+## 2026-10-22
+
+### 新增
+
+- **🔌 MCP 工具 節點**：不經 Claude，節點本身當 MCP client 呼叫一個 MCP 伺服器的工具
+  （只支援 **Streamable HTTP** 傳輸；stdio 與舊版 HTTP+SSE 不做）。
+  參數：伺服器 URL、工具名稱、JSON 參數（`args` 埠接線優先於參數欄，生效的是哪個會寫進日誌）、
+  認證環境變數名稱、逾時。**工具名稱留空＝改呼叫 `tools/list`，輸出工具清單**，方便先查名稱與參數。
+  輸出規則：工具回 `structuredContent` 就以它為輸出，否則把 content 的文字串起來；
+  content 含非文字項目時改輸出整個陣列（都會 log）。工具回 `isError` 視為**節點錯誤**（拋出，
+  下游整條標為「上游節點執行失敗」），不另開 fail 埠。模擬模式不連線。
+  後端新增 `/api/mcp`（`mcpCall`：initialize → notifications/initialized → tools/call，
+  回應 JSON 與 SSE 兩種都收，結束後盡力 DELETE 會話），零相依；比照 `/api/shell` 要求本次啟動的
+  `x-wfg-token`。**認證金鑰不進圖**：節點只填環境變數名稱，值在伺服器端才解析成
+  `Authorization: Bearer`。沒有「URL／工具名稱」輸入埠——上游只能提供參數，
+  呼叫哪台、哪個工具由圖的作者決定（同 Shell 節點不開指令埠的理由）。
+  為什麼做成內建節點而不是模組：HTTP 請求節點做不到（需要 initialize 握手、
+  `Mcp-Session-Id` 標頭、SSE 回應解析），而「呼叫 MCP 工具」本身與領域無關、是單一動作。
+
+---
+
 ## 2026-09-07
 
 ### 新增
