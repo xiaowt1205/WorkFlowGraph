@@ -89,12 +89,12 @@ FlowMap 存檔分成兩個資料夾，**scope 由檔案放在哪決定，不是 
 
 內建範例：① 簡單問答 ② 客服分流（條件分支） ③ 並行摘要翻譯 ④ 網路研究
 ⑤ 檔案報告（讀檔→整理→依樣板輸出 docx） ⑥ 程式碼產生（輸出限制→存 .cs 檔）
-⑦ Unity MCP（MCP 工具列出工具＋讀 Unity Console→LLM 整理）
+⑦ Unity MCP（MCP 代理：Claude 帶 MCP for Unity 的工具讀 Console 並整理）
 
 ## 節點
 
-共 19 種節點：輸入、外部檔案連結、資料夾連結、Prompt 模板、LLM 呼叫、程式碼、Shell 指令、
-HTTP 請求、MCP 工具、網路查詢、程式碼查詢、條件分支、合併、輸出檔案、輸出、節點輸入、節點輸出、
+共 20 種節點：輸入、外部檔案連結、資料夾連結、Prompt 模板、LLM 呼叫、程式碼、Shell 指令、
+HTTP 請求、MCP 工具、MCP 代理、網路查詢、程式碼查詢、條件分支、合併、輸出檔案、輸出、節點輸入、節點輸出、
 FlowMap 模組、註解。
 
 每個節點的用途、參數重點，以及**哪些會呼叫 Claude（產生費用）**，見
@@ -137,6 +137,8 @@ server.js（Node 內建 http，零依賴）
 | `POST /api/llm` | 純文字補全；呼叫時以 `--tools ""` ＋ `--strict-mcp-config` 空設定**關掉全部工具與 MCP**（白名單制，`--disallowedTools` 為第二道保險），模型只能回文字；cwd 錨定在空白暫存目錄（不吸附任何專案的 CLAUDE.md）；預設硬上限 900s |
 | `POST /api/websearch` | 白名單開放 WebSearch / WebFetch，其餘工具拔除；預設硬上限 900s |
 | `POST /api/codequery` | 白名單只留唯讀三件組（Read / Grep / Glob），其餘拔除；`cwd` 錨定在查詢起點資料夾，**範圍語意＝整個 repo**（起點為主、同 repo 檔案可讀——「正名 repo root」決議，起點與 repo 根都注入提示）；`檔案:行號` 引用**雙基準逐筆驗證**（起點相對→repo 根相對，repo 之外一律無效，回應含 `rebased` 筆數）；預設硬上限 1800s |
+| `POST /api/mcpagent` | Claude 帶著**請求指定的 MCP 伺服器**（HTTP／stdio，可多台）的工具執行任務：`--tools ""` 關掉全部內建工具、`--strict-mcp-config` 指到這次呼叫專屬的設定暫存檔（0600＋亂數檔名，用完即刪）、`--allowedTools mcp__<名稱>`；伺服器名稱只准英數、`-`、`_`。需要啟動權杖（`x-wfg-token`）；**stdio 的閘門在前端**（同 Shell 節點三道）；預設硬上限 900s |
+| `GET /api/mcp/known` | 列出本機 Claude Code 已設定的 MCP 伺服器（`~/.claude.json` 的使用者層與專案層、各專案 `.mcp.json`），供 MCP 代理的「從 Claude Code 設定帶入」選單複製用；需要啟動權杖 |
 | `/api/version-anchor`（GET `?path=…` 或 POST） | 確定性計算版本錨點：git 專案回 commit＋日期＋dirty，非 git 逐檔 sha256（格式同 version-anchor.json）；不經 LLM |
 | `POST /api/shell` | 在本機執行 shell 指令；整段指令只交給一個 shell 解析一次（`spawn(shell, ['-c', cmd], {shell:false})`，Windows 走 `cmd /d /s /c` ＋ verbatim），逾時殺整棵行程樹，stdout／stderr 各上限 1MB。**閘門在前端**（模擬模式／「允許 Shell」總開關／逐段確認），且伺服器只聽 loopback |
 | `POST /api/readfile` | 讀檔；docx / xlsx 為零依賴自製解析（自拆 zip + XML） |

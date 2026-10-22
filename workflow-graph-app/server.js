@@ -83,7 +83,7 @@ function shellQuoteArg(a) {
 
 /* system 提示寫進暫存檔。0600 + 'wx'：不跟隨既有檔案／symlink，也不讓同機其他使用者讀。
    檔名用 crypto 亂數而不是 Math.random()。依序試多個目錄，回傳可安全進命令列的路徑。 */
-function writeSysPromptFile(text) {
+function writeSysPromptFile(text, prefix = 'wfg-sys', ext = 'txt') {
   const dirs = [];
   if (process.env.WFG_TMP) dirs.push(process.env.WFG_TMP);
   dirs.push(os.tmpdir());
@@ -92,7 +92,7 @@ function writeSysPromptFile(text) {
   for (const dir of dirs) {
     if (IS_WIN && WIN_UNSAFE_PATH.test(dir)) continue;      // 這個目錄沒法安全地進命令列
     for (let i = 0; i < 3; i++) {
-      const f = path.join(dir, `wfg-sys-${process.pid}-${crypto.randomBytes(8).toString('hex')}.txt`);
+      const f = path.join(dir, `${prefix}-${process.pid}-${crypto.randomBytes(8).toString('hex')}.${ext}`);
       try {
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(f, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
@@ -382,7 +382,7 @@ async function callClaudeSdk({ system, prompt, model, policy, systemMode = 'repl
       tools: policy?.tools || [],              // 對應 CLI 的 --tools 白名單
       allowedTools: policy?.allowed || [],
       disallowedTools: policy?.disallowed || [],
-      mcpServers: {}, strictMcpConfig: true,   // 對應 --strict-mcp-config 空設定（SDK 路徑未實測：本機未安裝 SDK）
+      mcpServers: policy?.mcpServers || {}, strictMcpConfig: true,   // 對應 --strict-mcp-config（SDK 路徑未實測：本機未安裝 SDK）
       ...(model ? { model } : {}),
       ...(cwd ? { cwd } : {}),
       ...(resume ? { resume } : {}),
@@ -469,14 +469,71 @@ const POLICY = {
     disallowed: 'Bash,Write,Edit,MultiEdit,NotebookEdit,LS,WebFetch,WebSearch,Task,TodoWrite,BashOutput,KillShell,SlashCommand,ExitPlanMode'.split(','),
   },
 };
+/* MCP 代理的伺服器設定驗證：名稱會進 argv（--allowedTools mcp__名稱），只准英數、- 與 _；
+   HTTP 型要 http(s) url，stdio 型要 command。其餘欄位（headers / env / args）原樣交給 claude，
+   它支援 ${ENV} 展開，所以金鑰可以留在環境變數裡、不進圖。 */
+const MCP_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+function validateMcpServers(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('mcpServers 必須是物件');
+  const names = Object.keys(raw);
+  if (!names.length) throw new Error('沒有任何 MCP 伺服器');
+  const out = {};
+  for (const name of names) {
+    if (!MCP_NAME_RE.test(name)) throw new Error(`伺服器名稱只能用英數、- 與 _（1~64 字）：${String(name).slice(0, 40)}`);
+    const sv = raw[name];
+    if (!sv || typeof sv !== 'object' || Array.isArray(sv)) throw new Error(`伺服器 ${name} 的設定必須是物件`);
+    if (typeof sv.url === 'string') {
+      if (!/^https?:\/\//i.test(sv.url)) throw new Error(`伺服器 ${name} 的 url 必須是 http:// 或 https:// 開頭`);
+      const type = sv.type || 'http';
+      if (type !== 'http' && type !== 'sse') throw new Error(`伺服器 ${name} 的 type 只能是 http 或 sse`);
+      out[name] = { type, url: sv.url, ...(sv.headers && typeof sv.headers === 'object' ? { headers: sv.headers } : {}) };
+    } else if (typeof sv.command === 'string' && sv.command.trim()) {
+      const args = Array.isArray(sv.args) ? sv.args.map(String) : [];
+      out[name] = { type: 'stdio', command: sv.command, args, ...(sv.env && typeof sv.env === 'object' ? { env: sv.env } : {}) };
+    } else {
+      throw new Error(`伺服器 ${name} 需要 url（HTTP）或 command（stdio）`);
+    }
+  }
+  return out;
+}
+function knownMcpServers() {
+  const out = [];
+  const push = (scope, servers) => {
+    if (!servers || typeof servers !== 'object') return;
+    for (const [name, cfg] of Object.entries(servers)) {
+      if (!cfg || typeof cfg !== 'object') continue;
+      const type = cfg.type || (cfg.url ? 'http' : (cfg.command ? 'stdio' : '?'));
+      out.push({ name, scope, type, config: cfg });
+    }
+  };
+  const readJson = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+  const cj = readJson(path.join(os.homedir(), '.claude.json')) || {};
+  push('使用者', cj.mcpServers);
+  for (const [proj, pc] of Object.entries(cj.projects || {})) {
+    push(proj, pc && pc.mcpServers);
+    const m = readJson(path.join(proj, '.mcp.json'));
+    if (m) push(proj + ' (.mcp.json)', m.mcpServers);
+  }
+  return out;
+}
+const MCP_AGENT_SYSTEM = '你是工具操作助理。只用提供給你的 MCP 工具完成任務；需要資料就呼叫工具取得，不要憑記憶編造工具沒有回傳的內容。完成後用繁體中文、精簡地回報結果。';
+
 let warnedMcpCfg = false;
 function policyArgs(p) {
   const args = ['--tools', (p.tools || []).join(',')];   // 空陣列 → ""：走 shell 時 shellQuoteArg 會包成 ""
-  if (IS_WIN && WIN_UNSAFE_PATH.test(EMPTY_MCP_CONFIG)) {
+  /* 不載入 user/project/local 的 settings：那裡面的 hooks 與外掛會跑進每一次節點呼叫
+     （實測 SessionStart hook 的「要不要幫你設定 statusline」文字直接混進 LLM 節點的回答），
+     基底 context 也從 3.2k 再降到 1.1k token。與 SDK 後端的 settingSources 空值一致。
+     登入憑證不在 settings 裡，不受影響；managed settings 仍然生效。 */
+  args.push('--setting-sources', '');
+  // MCP 代理節點會帶自己的設定檔（p.mcpConfigPath）；其他節點一律空設定
+  const mcpCfg = p.mcpConfigPath || EMPTY_MCP_CONFIG;
+  if (IS_WIN && WIN_UNSAFE_PATH.test(mcpCfg)) {
     // 路徑含 " 或 % 就無法安全進 cmd.exe 命令列（見「命令列安全」）；寧可少一道也不硬拼
+    if (p.mcpConfigPath) throw new Error('MCP 設定暫存檔路徑含 " 或 %，無法安全傳給 claude：' + mcpCfg);
     if (!warnedMcpCfg) { warnedMcpCfg = true; console.warn('[policy] 程式目錄路徑含 " 或 %，無法傳 --mcp-config，MCP 工具不會被拔除：' + EMPTY_MCP_CONFIG); }
   } else {
-    args.push('--strict-mcp-config', '--mcp-config', EMPTY_MCP_CONFIG);
+    args.push('--strict-mcp-config', '--mcp-config', mcpCfg);
   }
   for (const t of p.allowed || []) args.push('--allowedTools', t);
   if (p.disallowed?.length) args.push('--disallowedTools', p.disallowed.join(','));
@@ -1750,6 +1807,36 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  /* MCP 代理：Claude 帶著「節點指定的那幾台 MCP 伺服器」的工具執行任務。
+     邊界同樣是機制：--tools ""（內建工具全關）＋ --strict-mcp-config 指到這次呼叫專屬的設定檔
+     （只含節點填的伺服器）＋ --allowedTools mcp__<名稱>（否則 headless 下每次工具呼叫都會被拒）。
+     設定檔寫在 0600 + wx 的亂數暫存檔，呼叫完即刪。
+     stdio 型伺服器等於「在這台機器啟動一個指令」，前端比照 Shell 節點三道閘門（模擬模式不呼叫、
+     工具列「允許 Shell」、逐份設定首次確認）；後端這一側用啟動權杖擋跨源直打。 */
+  if (url.pathname === '/api/mcpagent' && req.method === 'POST') {
+    if (req.headers['x-wfg-token'] !== API_TOKEN)
+      return json(res, 403, { error: 'MCP 代理端點需要本次啟動的權杖——請重新整理頁面後再試' });
+    let body;
+    try { body = JSON.parse(await readBody(req) || '{}'); } catch { return json(res, 400, { error: '請求不是合法 JSON' }); }
+    if (!body.prompt) return json(res, 400, { error: '缺少 prompt' });
+    let servers;
+    try { servers = validateMcpServers(body.mcpServers); } catch (e) { return json(res, 400, { error: 'MCP 設定不合法：' + e.message }); }
+    const cfgFile = writeSysPromptFile(JSON.stringify({ mcpServers: servers }), 'wfg-mcp', 'json');
+    if (!cfgFile) return json(res, 500, { error: '無法建立 MCP 設定暫存檔（找不到可用的暫存目錄；可設 WFG_TMP）' });
+    const names = Object.keys(servers);
+    const policy = { tools: [], allowed: names.map(n => 'mcp__' + n), disallowed: ALL_TOOLS, mcpConfigPath: cfgFile, mcpServers: servers };
+    try {
+      return await aiEndpoint(req, res, 'mcpagent', body, {
+        defTimeoutMs: 900000,
+        logLine: names.join(',') + ' ｜ ' + String(body.prompt).slice(0, 60).replace(/\n/g, ' ') + '…',
+        buildOpts: () => ({
+          system: body.system || MCP_AGENT_SYSTEM, prompt: body.prompt, model: body.model,
+          policy, systemMode: 'replace', cwd: LLM_CWD,
+        }),
+      });
+    } finally { try { fs.unlinkSync(cfgFile); } catch {} }
+  }
+
   if (url.pathname === '/api/websearch' && req.method === 'POST') {
     let body;
     try { body = JSON.parse(await readBody(req) || '{}'); } catch { return json(res, 400, { error: '請求不是合法 JSON' }); }
@@ -1949,6 +2036,15 @@ const server = http.createServer(async (req, res) => {
       console.error('[shell] 錯誤：' + e.message);
       return json(res, 500, { error: e.message });
     }
+  }
+
+  /* 本機已設定給 Claude Code 的 MCP 伺服器清單，給 MCP 代理節點的「從 Claude Code 設定帶入」選單。
+     來源：~/.claude.json 的 mcpServers（使用者層）、projects[*].mcpServers（專案層）、各專案根的 .mcp.json。
+     只供頁面複製：圖裡存的是副本，執行時不會回頭讀這些檔案（圖才能跨機器分享）。
+     設定可能含 env／headers 金鑰，所以比照 /api/mcp 要求啟動權杖。 */
+  if (url.pathname === '/api/mcp/known' && req.method === 'GET') {
+    if (req.headers['x-wfg-token'] !== API_TOKEN) return json(res, 403, { error: '需要本次啟動的權杖——請重新整理頁面後再試' });
+    return json(res, 200, { list: knownMcpServers() });
   }
 
   if (url.pathname === '/api/mcp' && req.method === 'POST') {

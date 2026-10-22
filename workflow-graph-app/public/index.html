@@ -12,7 +12,7 @@
   --accent:#5b8cff; --green:#3ecf8e; --red:#ff6b6b; --amber:#ffb02e;
   --node-bg:#1b2338; --node-head:#222c47;
   --c-input:#3ecf8e; --c-template:#b78bff; --c-llm:#5b8cff; --c-code:#ffb02e;
-  --c-http:#4dd0e1; --c-web:#2fd3b5; --c-filein:#9ccc65; --c-fileout:#f06eaa; --c-condition:#ff8a5c; --c-merge:#9aa7c7; --c-output:#ff6b9d; --c-note:#6b7694; --c-subflow:#ffe066; --c-modin:#c3e653; --c-modout:#e0995e; --c-codequery:#c86bfa; --c-folderlink:#c9b458; --c-shell:#eef2ff; --c-mcp:#6ea8fe;
+  --c-http:#4dd0e1; --c-web:#2fd3b5; --c-filein:#9ccc65; --c-fileout:#f06eaa; --c-condition:#ff8a5c; --c-merge:#9aa7c7; --c-output:#ff6b9d; --c-note:#6b7694; --c-subflow:#ffe066; --c-modin:#c3e653; --c-modout:#e0995e; --c-codequery:#c86bfa; --c-folderlink:#c9b458; --c-shell:#eef2ff; --c-mcp:#6ea8fe; --c-mcpagent:#b39dff;
   --radius:10px;
   font-size:14px;
 }
@@ -469,6 +469,17 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
    不是圖的內容，寫進 params 會被存檔、之後匯出給別人就變成預先核准。 */
 const shellApproved = new Set();
 const shellKey = (shell, cwd, cmd) => `${shell}\u0000${cwd}\u0000${cmd}`;
+/* MCP 代理節點的「MCP 伺服器設定」參數：接受 {"mcpServers":{名稱:{…}}}，或單一伺服器物件
+   （有 url 或 command）——後者自動命名為 server。回 { ok, servers } 或 { ok:false, error }。 */
+function parseMcpParam(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return { ok: true, servers: {} };
+  let v; try { v = JSON.parse(t); } catch (e) { return { ok: false, error: e.message }; }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return { ok: false, error: '必須是 JSON 物件' };
+  if (v.mcpServers && typeof v.mcpServers === 'object') return { ok: true, servers: v.mcpServers };
+  if (typeof v.url === 'string' || typeof v.command === 'string') return { ok: true, servers: { server: v } };
+  return { ok: true, servers: v };   // 視為 {名稱: 設定} 的簡寫
+}
 const clip = (s, n=120) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n) + '…' : s; };
 
 /* LLM 節點「輸出限制」：每種限制＝一段固定守則（注入 system）＋一個強制後處理 */
@@ -570,7 +581,7 @@ async function aiFetch(url, payload, ctx) {
   const res = await fetch(url, {
     signal: ctx.signal,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-wfg-token': API_TOKEN },
     body: JSON.stringify(payload),
   });
   let data = null;
@@ -919,6 +930,72 @@ const NodeTypes = {
         ctx.log(`content 含非文字項目（${content.filter(c => c.type !== 'text').map(c => c.type).join('、')}）→ 以整個 content 陣列輸出`);
       if (content.length && content.every(c => c.type === 'text')) return { out: text };
       return { out: content };
+    }
+  },
+  mcpagent: {
+    title: 'MCP 代理', color: 'var(--c-mcpagent)', icon: '🤖',
+    inputs: [{ name: 'prompt', label: '任務（給 Claude 的提示）' }],
+    outputs: [{ name: 'out', label: '回覆' }],
+    params: [
+      { key: 'mcp', label: 'MCP 伺服器設定（JSON）。可用上方選單從 Claude Code 的設定帶入；或照 MCP 伺服器 README 的 JSON 貼上。金鑰寫 ${環境變數名}，不要寫明文', kind: 'textarea', def: '',
+        ph: 'HTTP 型：{"url":"http://127.0.0.1:8080/mcp"}\nstdio 型：{"command":"uvx","args":["--from","mcpforunityserver==10.3.0","mcp-for-unity"]}\n多台：{"mcpServers":{"名稱":{…},"名稱2":{…}}}' },
+      { key: 'system', label: 'System 提示（留空＝預設的工具操作助理守則）', kind: 'textarea', def: '' },
+      { key: 'model', label: '模型', kind: 'select', options: ['預設', 'haiku', 'sonnet', 'opus'], def: '預設' },
+      { key: 'session', label: '會話名（選填）：同名 AI 節點在同一次執行中依序共用一個 Claude 會話；會話綁定 MCP 設定，設定不同就另開', kind: 'text', def: '' },
+      { key: 'timeout', label: '逾時上限（秒；0＝用預設 900s；持續有輸出就不會被砍）', kind: 'number', def: 0, min: 0, step: 30 },
+    ],
+    summary: n => {
+      const p = parseMcpParam(n.params.mcp);
+      const names = p.ok ? Object.keys(p.servers) : [];
+      const stdio = p.ok && names.some(k => p.servers[k] && p.servers[k].command);
+      return (stdio && !state.allowShell ? '⚠ stdio 伺服器需開啟「允許 Shell」\n' : '') + sessionLabel(n)
+        + (!p.ok ? '⚠ MCP 設定不是合法 JSON' : names.length
+            ? names.map(k => k + (p.servers[k]?.command ? '（stdio）' : '（HTTP）')).join('、') : '（未設定 MCP 伺服器）')
+        + '\n本地 Claude（' + modelLabel(n) + '）';
+    },
+    /* 與 🔌 MCP 工具 的分工：那顆是確定性的「呼叫某個工具」，這顆是「把這幾台 MCP 的工具交給 Claude，
+       讓它自己決定呼叫哪些、幾次」。邊界靠後端旗標：--tools "" 全關內建工具、--strict-mcp-config 只載入
+       節點填的伺服器、--allowedTools mcp__<名稱>。stdio 型伺服器會在這台機器啟動指令，閘門比照 Shell 節點：
+       ① 模擬模式不呼叫 ② 工具列「允許 Shell」③ 每份新設定首次執行先確認。HTTP 型不需要這些閘門。 */
+    async run(ctx) {
+      const prompt = String(ctx.inputs.prompt ?? '').trim();
+      const p = parseMcpParam(ctx.params.mcp);
+      if (!p.ok) throw new Error('MCP 伺服器設定不是合法 JSON：' + p.error);
+      const names = Object.keys(p.servers);
+      if (!names.length) throw new Error('未設定 MCP 伺服器（在右側檢查器填入 JSON）');
+      if (!prompt) throw new Error('沒有任務內容（接線到 prompt 埠）');
+      const stdio = names.filter(k => p.servers[k] && typeof p.servers[k].command === 'string');
+      if (state.simulate) {
+        await sleep(500);
+        ctx.log('模擬模式：不啟動 MCP 伺服器、不呼叫 Claude');
+        return { out: `【模擬模式】Claude 會帶著 ${names.join('、')} 的工具執行：\n` + clip(prompt, 200) };
+      }
+      if (stdio.length) {
+        if (!state.allowShell)
+          throw new Error(`MCP 代理被擋下：設定裡的 ${stdio.join('、')} 是 stdio 伺服器，會在這台機器啟動指令` +
+            `「${p.servers[stdio[0]].command}」。請先確認設定內容，再打開工具列的「允許 Shell」（重新整理後會自動關回去）`);
+        const key = shellKey('mcp-stdio', '', JSON.stringify(p.servers));
+        if (!shellApproved.has(key)) {
+          const r = await openModal({
+            title: '要在這台機器上啟動 MCP 伺服器嗎？',
+            sub: `節點「${esc(ctx.params._label || 'MCP 代理')}」會以 stdio 啟動：` +
+                 stdio.map(k => `<pre style="white-space:pre-wrap;word-break:break-all;margin:8px 0;max-height:120px;overflow:auto">${esc(k + '：' + [p.servers[k].command, ...(Array.isArray(p.servers[k].args) ? p.servers[k].args : [])].join(' '))}</pre>`).join('') +
+                 `核准後，同一份設定在這次開頁期間不會再問；設定內容改過就會重新詢問。`,
+            buttons: [{ label: '取消', value: 'cancel' }, { label: '啟動並執行', value: 'ok', primary: true }],
+          });
+          if (!r) throw new Error('使用者取消了 MCP 伺服器的啟動');
+          shellApproved.add(key);
+          ctx.log('已核准這份 stdio 設定（內容改變時會再問一次）');
+        }
+        if (ctx.signal?.aborted) throw new Error('已中斷');
+      }
+      ctx.log(`Claude 只拿得到 ${names.map(k => 'mcp__' + k + '__*').join('、')}，其餘內建工具全部關閉`);
+      const sess = aiSession(ctx, JSON.stringify(p.servers));   // 會話綁定 MCP 設定
+      const payload = { prompt, system: ctx.params.system || undefined, model: resolveModel(ctx), mcpServers: p.servers };
+      if (sess.resume) payload.resume = sess.resume;
+      const data = await aiFetch('/api/mcpagent', payload, ctx);
+      aiSessionDone(ctx, sess, data);
+      return { out: data.text };
     }
   },
   websearch: {
@@ -2070,7 +2147,9 @@ function renderInspector() {
   for (const p of t.params) {
     h += `<label>${esc(p.label)}</label>`;
     const v = n.params[p.key] ?? p.def ?? '';   // 舊圖沒有的新參數，顯示型別預設值
-    if (p.kind === 'textarea') h += `<textarea data-pkey="${p.key}" rows="4">${esc(v)}</textarea>`;
+    if (n.type === 'mcpagent' && p.key === 'mcp')
+      h += `<select class="mcp-known" title="讀取本機 Claude Code 已設定的 MCP 伺服器（~/.claude.json 與各專案 .mcp.json），選一台把設定複製進下方欄位"><option value="">從 Claude Code 設定帶入…（讀取中）</option></select>`;
+    if (p.kind === 'textarea') h += `<textarea data-pkey="${p.key}" rows="4" placeholder="${esc(p.ph || '')}">${esc(v)}</textarea>`;
     else if (p.kind === 'select') h += `<select data-pkey="${p.key}">${p.options.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
     else if (p.kind === 'number') h += `<input type="number" data-pkey="${p.key}" value="${esc(v)}" step="${p.step ?? 1}" ${p.min !== undefined ? `min="${p.min}"` : ''} ${p.max !== undefined ? `max="${p.max}"` : ''}>`;
     else if (p.kind === 'file' || p.kind === 'folder')
@@ -2215,6 +2294,26 @@ function renderInspector() {
     }
     btn.disabled = false; btn.textContent = '🔌 測試連線';
   });
+  const known = form.querySelector('.mcp-known');
+  if (known) {
+    fetch('/api/mcp/known', { headers: { 'x-wfg-token': API_TOKEN } }).then(r => r.json()).then(d => {
+      const list = d.list || [];
+      known.innerHTML = `<option value="">從 Claude Code 設定帶入…${list.length ? `（本機有 ${list.length} 台）` : '（本機沒有找到任何 MCP 設定）'}</option>` +
+        list.map((sv, i) => `<option value="${i}">${esc(sv.name)}（${esc(sv.type)}）— ${esc(sv.scope)}</option>`).join('');
+      known.addEventListener('change', () => {
+        const sv = list[Number(known.value)];
+        if (!sv) return;
+        const ta = form.querySelector('textarea[data-pkey="mcp"]');
+        if (!ta) return;
+        ta.value = JSON.stringify({ mcpServers: { [sv.name]: sv.config } }, null, 2);
+        ta.dispatchEvent(new Event('input'));     // 走既有的即打即存
+        ta.dispatchEvent(new Event('change'));    // 讓節點卡片的摘要立即更新（同 📂 瀏覽 的做法）
+        log(`已帶入 MCP 伺服器「${sv.name}」（${sv.type}，來源：${sv.scope}）——圖裡存的是副本，之後改 Claude Code 設定不會跟著變`, 'ok');
+        if (Object.keys(sv.config.env || {}).length || Object.keys(sv.config.headers || {}).length) log('⚠ 帶入的設定含 env／headers：請確認沒有明文金鑰，需要的話改寫成 ${環境變數名}', 'wr');
+        known.value = '';
+      });
+    }).catch(() => { known.innerHTML = '<option value="">（無法讀取本機 Claude Code 設定）</option>'; });
+  }
   form.querySelectorAll('[data-pkey]').forEach(el => {
     // 即打即存：input 事件就寫回狀態，避免「打完字沒失焦就執行/匯出」漏存
     let histPushed = false;
@@ -2717,20 +2816,14 @@ const Examples = [
     ]),
   },
   {
-    name: '⑦ Unity MCP（MCP 工具 → 讀 Unity Console → LLM 整理）',
+    name: '⑦ Unity MCP（MCP 代理：Claude 帶 Unity 工具讀 Console）',
     build: () => G([
-      ['note', 'note', 30, -120, { text: '前置：MCP for Unity 以 HTTP 傳輸啟動（預設 http://127.0.0.1:8080/mcp），且 Unity Editor 已連上它。先點「列出 Unity 工具」節點，按檢查器的「🔌 測試連線」確認通了再執行。同時開著多個 Unity 時，參數加 "unity_instance":"專案名@hash" 指定要哪一個。' }],
-      ['list', 'mcp', 30, 60, { url: 'http://127.0.0.1:8080/mcp', tool: '', _label: '列出 Unity 工具' }],
-      ['lout', 'output', 330, 60, { name: '工具清單' }],
-      ['args', 'input', 30, 300, { value: '{"action":"get","types":["error","warning"],"count":20}', _label: '讀取參數' }],
-      ['con', 'mcp', 330, 300, { url: 'http://127.0.0.1:8080/mcp', tool: 'read_console', _label: '讀 Unity Console' }],
-      ['txt', 'code', 620, 300, { code: '// MCP 工具回的是物件（structuredContent），模板節點只吃文字 → 先轉成 JSON 字串\nreturn typeof a === \'string\' ? a : JSON.stringify(a, null, 2);', _label: '轉成文字' }],
-      ['tpl', 'template', 880, 300, { template: '以下是 Unity Editor Console 最近的錯誤與警告（JSON）。請依訊息分組、各給一句可能原因與下一步，最後列出最該先處理的一項：\n\n@轉成文字' }],
-      ['llm', 'llm', 1140, 300, { system: '你是 Unity 開發助理，回答精簡、條列。', model: 'haiku', _label: '整理錯誤' }],
-      ['out', 'output', 1400, 300, { name: '錯誤摘要' }],
+      ['note', 'note', 30, -110, { text: '前置：裝好 MCP for Unity（CoplayDev/unity-mcp，需要 uv），Unity Editor 開著。這顆以 stdio 啟動 MCP 伺服器，要先打開工具列的「允許 Shell」，首次執行會再確認一次。同時開著多個 Unity 時，在任務裡寫明要哪個專案。費用提醒：MCP for Unity 有 29 個工具、schema 很大，每一輪約 6 萬輸入 token（實測一次 2 輪＝13.8 萬），所以這裡預設 sonnet；只要單純呼叫某個工具、不想花 token，改用 🔌 MCP 工具（HTTP 傳輸）。' }],
+      ['task', 'input', 30, 120, { value: '讀取 Unity Console 最近 20 筆錯誤與警告，依訊息分組，各給一句可能原因與下一步，最後列出最該先處理的一項。沒有任何錯誤或警告就直接說沒有。', _label: '任務' }],
+      ['agent', 'mcpagent', 330, 120, { mcp: '{"command":"uvx","args":["--from","mcpforunityserver==10.3.0","mcp-for-unity"]}', model: 'sonnet', _label: 'Unity MCP 代理' }],
+      ['out', 'output', 660, 120, { name: '錯誤摘要' }],
     ], [
-      ['list.out', 'lout.value'],
-      ['args.out', 'con.args'], ['con.out', 'txt.a'], ['txt.out', 'tpl.in'], ['tpl.out', 'llm.prompt'], ['llm.out', 'out.value'],
+      ['task.out', 'agent.prompt'], ['agent.out', 'out.value'],
     ]),
   },
 ];

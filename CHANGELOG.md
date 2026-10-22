@@ -29,10 +29,26 @@
   做一次 initialize ＋ tools/list，成功顯示伺服器名稱、版本與工具名稱清單，失敗顯示原因
   （連不上、HTTP 狀態碼、環境變數沒值、逾時 15s）。結果只顯示在檢查器與執行日誌，不進圖、
   不存檔；它是診斷動作，**不受模擬模式影響**（真的會連線）。
-- **內建範例 ⑦ Unity MCP**：示範用 🔌 MCP 工具 接 MCP for Unity 的 Streamable HTTP 端點
-  （預設 `http://127.0.0.1:8080/mcp`）——一顆留空工具名稱列出 Unity 工具清單，另一條鏈用
-  `read_console` 讀 Unity Console 的錯誤與警告 → 𝑓 程式碼 轉成 JSON 文字 → ✍ 模板 → 🧠 LLM 整理成摘要。
-  前置條件（MCP for Unity 以 HTTP 傳輸啟動、Unity Editor 已連上）寫在範例的註解節點裡。
+- **🤖 MCP 代理 節點**：把節點指定的 MCP 伺服器（HTTP 或 stdio，JSON 設定，可多台）的工具交給
+  Claude，讓它依任務自己決定呼叫哪些工具、幾次。與 🔌 MCP 工具 的分工：那顆是確定性、不花 token 的
+  「呼叫某個工具」；這顆適合「讀 Console 然後整理」這種一句話任務，而且任何傳輸都能接（stdio 也行）。
+  邊界是機制不是提示詞：後端新增 `/api/mcpagent`，`--tools ""` 關掉全部內建工具、
+  `--strict-mcp-config` 指到這次呼叫專屬的設定檔（0600＋亂數檔名，用完即刪，只含節點填的伺服器）、
+  `--allowedTools mcp__<名稱>`（headless 下沒有它每次工具呼叫都會被拒，已實測）。
+  **stdio 型伺服器等於在這台機器啟動指令**，閘門比照 Shell 節點三道：模擬模式不呼叫、工具列
+  「允許 Shell」總開關、每份新設定首次執行彈出確認（列出完整指令）；HTTP 型不需要閘門。
+  後端比照 `/api/shell` 要求啟動權杖（`aiFetch` 現在一律帶 `x-wfg-token`）。
+  實測：HTTP 假伺服器兩個工具連續呼叫 7.9k 輸入 token、$0.0011；stdio 假伺服器同樣通過，
+  閘門關著時被明確擋下、設定不是合法 JSON 時報錯、模擬模式不連線。
+- **MCP 代理的檢查器多了「從 Claude Code 設定帶入」選單**：後端新增 `GET /api/mcp/known`，讀本機
+  `~/.claude.json`（使用者層 mcpServers 與 projects[*].mcpServers）與各專案根的 `.mcp.json`，選單列出
+  「名稱（傳輸）— 來源」，點選就把那台的設定以 `{"mcpServers":{"名稱":{…}}}` 複製進設定欄並寫進日誌。
+  帶入的是**副本**：圖不會回頭依賴本機設定，之後改 Claude Code 的設定不會跟著變。設定含 env／headers
+  時提醒檢查明文金鑰。設定欄空白時顯示 HTTP／stdio／多台三種格式的佔位範例（textarea 參數新增 `ph`）。
+- **內建範例 ⑦ Unity MCP 改用 🤖 MCP 代理**（原版用 🔌 MCP 工具 走 HTTP）：以 stdio 啟動
+  MCP for Unity（`uvx --from mcpforunityserver==10.3.0 mcp-for-unity`），任務＝讀 Console 最近
+  20 筆錯誤與警告並整理。原因：CoplayDev/unity-mcp 預設是 stdio，HTTP 模式還要在 Unity 端切換傳輸，
+  代理版開箱即用。前置條件（uv、允許 Shell）寫在範例的註解節點。
 
 ### 變更
 
@@ -46,6 +62,11 @@
   網路查詢 4.6k、程式碼查詢 5.9k；把 ToolSearch 加進黑名單則反而升到 73.5k，所以不採用。
   需要支援 `--tools` 的 Claude Code（本機 2.1.304 可用）；Agent SDK 後端同步加了
   `tools` / `strictMcpConfig` 選項但未實測。
+- **AI 節點呼叫 claude 時不再載入 user／project／local 的 settings**（`--setting-sources ""`）。
+  原本 settings 裡的 hooks 與外掛會跑進每一次節點呼叫——實測 Ponytail 外掛的 SessionStart hook
+  文字「要不要幫你設定 statusline」直接混進 LLM 節點的回答。改後純文字呼叫的基底 context 從
+  3.2k 再降到 1.1k token，與 Agent SDK 後端的 settingSources 空值一致。登入憑證不在 settings 裡，
+  不受影響；managed settings 仍生效。
 
 ---
 
